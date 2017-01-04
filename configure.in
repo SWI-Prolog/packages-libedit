@@ -19,6 +19,7 @@ if test "$have_libedit" = yes; then
   AC_CHECK_HEADERS(histedit.h)
   if test "$ac_cv_header_histedit_h" = yes; then
     LIBS="-ledit $LIBS"
+    AC_CHECK_FUNCS(el_cursor)
   else
     have_libedit=no
   fi

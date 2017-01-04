@@ -1,0 +1,32 @@
+dnl Process this file with autoconf to produce a configure script.
+
+AC_INIT(install-sh)
+AC_PREREQ([2.50])
+AC_CONFIG_HEADER(config.h)
+
+AC_SUBST(CIFLAGS)
+AC_SUBST(TARGETS)
+AC_SUBST(PLTARGETS)
+
+m4_include([../ac_swi_c.m4])
+
+AC_CHECK_FUNCS(poll)
+AC_CHECK_HEADERS(unistd.h uxnt.h sys/ioctl.h poll.h)
+
+AC_CHECK_LIB(edit, el_init, have_libedit=yes)
+
+if test "$have_libedit" = yes; then
+  AC_CHECK_HEADERS(histedit.h)
+  if test "$ac_cv_header_histedit_h" = yes; then
+    LIBS="-ledit $LIBS"
+  else
+    have_libedit=no
+  fi
+fi
+
+if test "$have_libedit" = yes; then
+  TARGETS="libedit4pl.$SO"
+  PLTARGETS="editline.pl"
+fi
+
+AC_OUTPUT(Makefile)

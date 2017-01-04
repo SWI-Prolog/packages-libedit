@@ -126,6 +126,9 @@ typedef struct el_context
     int move;				/* Amount to move */
     electric_state state;
   } electric;
+#ifndef HAVE_EL_CURSOR
+  int			move_cursor;	/* Amount to move the cursor */
+#endif
 } el_context;
 
 static el_context *el_clist;
@@ -180,6 +183,36 @@ update_prompt(el_context *ctx)
     free(ctx->prompt);
   ctx->prompt = np ? strdup(np) : NULL;
 }
+
+
+		 /*******************************
+		 *	        PORT		*
+		 *******************************/
+
+#ifndef HAVE_EL_CURSOR
+#define el_cursor(el, cnt) el_cursor_emulated(el, cnt)
+
+static int
+el_cursor_emulated(EditLine *el, int count)
+{ el_context *ctx;
+  const LineInfo *li;
+
+  el_get(el, EL_CLIENTDATA, (void**)&ctx);
+  li = el_line(ctx->el);
+
+  if ( count < 0 )			/* backward */
+  { if ( -count > li->cursor - li->buffer )
+      count = li->buffer - li->cursor;
+  } else
+  { if ( count > li->lastchar - li->cursor )
+      count = li->lastchar - li->cursor;
+  }
+
+  ctx->move_cursor = count;
+
+  return li->cursor - li->buffer + count;
+}
+#endif
 
 
 		 /*******************************
@@ -475,6 +508,19 @@ read_char(EditLine *el, wchar_t *cp)
 
   el_get(el, EL_CLIENTDATA, (void**)&ctx);	/* What to do if we have no context? */
   el_get(el, EL_GETFP, 0, &in);
+
+#ifndef HAVE_EL_CURSOR
+  if ( ctx->move_cursor )
+  { if ( ctx->move_cursor > 0 )
+    { *cp = (wchar_t)('F'-'@');
+      ctx->move_cursor--;
+    } else
+    { *cp = (wchar_t)('B'-'@');
+      ctx->move_cursor++;
+    }
+    return 1;
+  }
+#endif
 
   if ( ctx->electric.move )
   { switch(ctx->electric.state)

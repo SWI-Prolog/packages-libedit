@@ -7,7 +7,7 @@
 
 \onefile
 \htmloutput{.}					% Output directory
-\htmlmainfile{readline}				% Main document file
+\htmlmainfile{libedit}				% Main document file
 \bodycolor{white}				% Page colour
 
 \begin{document}

@@ -495,9 +495,14 @@ read__fixio(int fd, int e)
   }
 }
 
+#ifdef HAVE_EL_WSET
+#define el_char_t wchar_t
+#else
+#define el_char_t unsigned char
+#endif
 
 static int
-read_char(EditLine *el, wchar_t *cp)
+read_char(EditLine *el, el_char_t *cp)
 { ssize_t num_read;
   int tried = 0;
   char cbuf[MB_LEN_MAX];
@@ -512,10 +517,10 @@ read_char(EditLine *el, wchar_t *cp)
 #ifndef HAVE_EL_CURSOR
   if ( ctx->move_cursor )
   { if ( ctx->move_cursor > 0 )
-    { *cp = (wchar_t)('F'-'@');
+    { *cp = (el_char_t)('F'-'@');
       ctx->move_cursor--;
     } else
-    { *cp = (wchar_t)('B'-'@');
+    { *cp = (el_char_t)('B'-'@');
       ctx->move_cursor++;
     }
     return 1;
@@ -527,11 +532,11 @@ read_char(EditLine *el, wchar_t *cp)
     { case E_WAIT:				/* "^[" */
 	ctx->electric.state = E_COMMAND;
 	wait_on_fd(fileno(in), ctx->electric.timeout);
-        *cp = L'\e';
+        *cp = (el_char_t)'\e';
 	return 1;
       case E_COMMAND:
 	ctx->electric.state = E_NONE;
-	*cp = L'\1';				/* "^A" */
+	*cp = (el_char_t)'\1';			/* "^A" */
         return 1;
       case E_NONE:
 	break;
@@ -542,7 +547,7 @@ read_char(EditLine *el, wchar_t *cp)
   ctx->sig_no = 0;
   if ( !PL_dispatch(fileno(in), PL_DISPATCH_WAIT) )
   { Sset_exception(ctx->istream, PL_exception(0));
-    *cp = L'\0';
+    *cp = (el_char_t)'\0';
     return -1;
   }
 
@@ -551,7 +556,7 @@ read_char(EditLine *el, wchar_t *cp)
 
     switch (ctx->sig_no)
     { case SIGCONT:
-	el_wset(el, EL_REFRESH);
+	el_set(el, EL_REFRESH);
         goto again;
       case SIGWINCH:
 	el_resize(el);
@@ -561,7 +566,7 @@ read_char(EditLine *el, wchar_t *cp)
     }
     if ( PL_handle_signals() < 0 )
     { Sset_exception(ctx->istream, PL_exception(0));
-      *cp = L'\0';
+      *cp = (el_char_t)'\0';
       return -1;
     }
 
@@ -570,17 +575,18 @@ read_char(EditLine *el, wchar_t *cp)
       tried = 1;
     } else
     { errno = e;
-      *cp = L'\0';
+      *cp = (el_char_t)'\0';
       return -1;
     }
   }
 
   /* Test for EOF */
   if ( num_read == 0 )
-  { *cp = L'\0';
+  { *cp = (el_char_t)'\0';
     return 0;
   }
 
+#ifdef HAVE_EL_WSET
   for (;;)
   { mbstate_t mbs;
 
@@ -611,7 +617,7 @@ read_char(EditLine *el, wchar_t *cp)
 	 if ( /*(el->el_flags & CHARSET_IS_UTF8 ) == 0 || We don't have that */
 	      cbp >= MB_LEN_MAX) {
 	   errno = EILSEQ;
-	   *cp = L'\0';
+	   *cp = (el_char_t)'\0';
 	   return -1;
 	 }
 	 /* Incomplete sequence, read another byte. */
@@ -621,6 +627,10 @@ read_char(EditLine *el, wchar_t *cp)
 	 return 1;
     }
   }
+#else
+  *cp = cbuf[0]&0xff;
+  return 1;
+#endif
 }
 
 
@@ -717,7 +727,11 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr)
 
       ctx->el = el_init(prog, fin, fout, ferr);
 
+#ifdef HAVE_EL_WSET
       el_wset(ctx->el, EL_GETCFN,     read_char);
+#else
+      el_set(ctx->el, EL_GETCFN,      read_char);
+#endif
       el_set( ctx->el, EL_PROMPT,     prompt);
       el_set( ctx->el, EL_HIST,       history, ctx->history);
       el_set( ctx->el, EL_EDITOR,     "emacs");

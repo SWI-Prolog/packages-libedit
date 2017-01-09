@@ -362,7 +362,7 @@ electric_end(EditLine *el, int ch)
 static void
 electric_init(EditLine *el)
 { el_set(el, EL_ADDFN, "electric-end", "Restore electric caret", electric_end);
-  el_set(el, EL_BIND,  "^[^A", "electric-end");
+  el_set(el, EL_BIND,  "^[^A", "electric-end", NULL);
 }
 
 

@@ -76,7 +76,7 @@ static atom_t ATOM_fatal;
 static functor_t FUNCTOR_line2;
 static functor_t FUNCTOR_electric3;
 
-#define STR_OPTIONS (CVT_ATOM|CVT_STRING|REP_MB|CVT_EXCEPTION)
+#define STR_OPTIONS (CVT_ATOM|CVT_STRING|CVT_LIST|REP_MB|CVT_EXCEPTION)
 
 
 		 /*******************************

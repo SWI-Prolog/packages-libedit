@@ -395,7 +395,14 @@ complete(Input, _Char, Continue) :-
     ;   retractall(last_complete(_,_)),
         get_time(Now),
         asserta(last_complete(Now, Before)),
-        Continue = refresh_beep
+        common_competion(Completions, Extend),
+        (   Delete == Extend
+        ->  Continue = refresh_beep
+        ;   string_length(Delete, Len),
+            el_deletestr(Input, Len),
+            el_insertstr(Input, Extend),
+            Continue = refresh
+        )
     ).
 
 %!  show_completions(+Input, +Char, -Continue) is det.
@@ -411,6 +418,56 @@ show_completions(Input, _Char, Continue) :-
 
 complete_text(Text-_Comment, Text) :- !.
 complete_text(Text, Text).
+
+%!  common_competion(+Alternatives, -Common) is det.
+%
+%   True when Common is the common prefix of all candidate Alternatives.
+
+common_competion(Alternatives, Common) :-
+    maplist(atomic, Alternatives),
+    !,
+    common_prefix(Alternatives, Common).
+common_competion(Alternatives, Common) :-
+    maplist(complete_text, Alternatives, AltText),
+    !,
+    common_prefix(AltText, Common).
+
+%!  common_prefix(+Atoms, -Common) is det.
+%
+%   True when Common is the common prefix of all Atoms.
+
+common_prefix([A1|T], Common) :-
+    common_prefix_(T, A1, Common).
+
+common_prefix_([], Common, Common).
+common_prefix_([H|T], Common0, Common) :-
+    common_prefix(H, Common0, Common1),
+    common_prefix_(T, Common1, Common).
+
+%!  common_prefix(+A1, +A2, -Prefix:string) is det.
+%
+%   True when Prefix is the common prefix of the atoms A1 and A2
+
+common_prefix(A1, A2, Prefix) :-
+    sub_atom(A1, 0, _, _, A2),
+    !,
+    Prefix = A2.
+common_prefix(A1, A2, Prefix) :-
+    sub_atom(A2, 0, _, _, A1),
+    !,
+    Prefix = A1.
+common_prefix(A1, A2, Prefix) :-
+    atom_codes(A1, C1),
+    atom_codes(A2, C2),
+    list_common_prefix(C1, C2, C),
+    string_codes(Prefix, C).
+
+list_common_prefix([H|T0], [H|T1], [H|T]) :-
+    !,
+    list_common_prefix(T0, T1, T).
+list_common_prefix(_, _, []).
+
+
 
 %!  list_alternatives(+Alternatives)
 %

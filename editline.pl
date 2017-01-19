@@ -47,6 +47,8 @@
             el_insertstr/2,                     % +Input, +Text
             el_deletestr/2,                     % +Input, +Count
 
+            el_history/2,                       % +Input, ?Action
+            el_history_events/2,                % +Input, -Events
             el_add_history/2,                   % +Input, +Line
             el_write_history/2,                 % +Input, +FileName
             el_read_history/2                   % +Input, +FileName
@@ -204,6 +206,25 @@ add_prolog_commands(Input) :-
 %
 %   Delete Count characters before the cursor.
 
+%!  el_history(+In:stream, ?Action) is det.
+%
+%   Perform a generic action on the history. This provides an incomplete
+%   interface to history() from libedit.  Supported actions are:
+%
+%     * clear
+%     Clear the history.
+%     * setsize(+Integer)
+%     Set size of history to size elements.
+%     * setunique(+Boolean)
+%     Set flag that adjacent identical event strings should not be
+%     entered into the history.
+
+%!  el_history_events(+In:stream, -Events:list(pair)) is det.
+%
+%   Unify Events with a list of pairs   of  the form `Num-String`, where
+%   `Num` is the event number  and   `String`  is  the associated string
+%   without terminating newline.
+
 %!  el_add_history(+In:stream, +Line:text) is det.
 %
 %   Add a line to the command line history.
@@ -231,6 +252,20 @@ prolog:history(Input, load(File)) :-
     el_read_history(Input, File).
 prolog:history(Input, save(File)) :-
     el_write_history(Input, File).
+prolog:history(Input, load) :-
+    el_history_events(Input, Events),
+    '$reverse'(Events, RevEvents),
+    forall('$member'(Ev, RevEvents),
+           add_event(Ev)).
+
+add_event(Num-String) :-
+    remove_dot(String, String1),
+    '$save_history_event'(Num-String1).
+
+remove_dot(String0, String) :-
+    string_concat(String, ".", String0),
+    !.
+remove_dot(String, String).
 
 
 		 /*******************************

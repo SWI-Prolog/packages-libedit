@@ -35,6 +35,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#define PL_ARITY_AS_SIZE 1
 #include <SWI-Stream.h>
 #include <SWI-Prolog.h>
 #include <config.h>
@@ -72,9 +73,13 @@ static atom_t ATOM_cursor;
 static atom_t ATOM_redisplay;
 static atom_t ATOM_error;
 static atom_t ATOM_fatal;
+static atom_t ATOM_clear;
+static atom_t ATOM_setsize;
+static atom_t ATOM_setunique;
 
 static functor_t FUNCTOR_line2;
 static functor_t FUNCTOR_electric3;
+static functor_t FUNCTOR_pair2;
 
 #define STR_OPTIONS (CVT_ATOM|CVT_STRING|CVT_LIST|REP_MB|CVT_EXCEPTION)
 
@@ -723,7 +728,8 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr)
       ctx->estream = err;
 
       ctx->history = history_init();
-      history(ctx->history, &ctx->ev, H_SETSIZE, 100);
+      history(ctx->history, &ctx->ev, H_SETSIZE,   100);
+      history(ctx->history, &ctx->ev, H_SETUNIQUE, TRUE);
 
       ctx->el = el_init(prog, fin, fout, ferr);
 
@@ -1263,6 +1269,120 @@ pl_read_history(term_t tin, term_t file_name)
 }
 
 
+static int
+append_ev(term_t tail, term_t head, const HistEvent *ev)
+{ return ( PL_unify_list(tail, head, tail) &&
+	   PL_unify_term(head, PL_FUNCTOR, FUNCTOR_pair2,
+			 PL_INT, ev->num,
+			 PL_UTF8_STRING, ev->str) );
+}
+
+
+static foreign_t
+pl_history_events(term_t tin, term_t events)
+{ el_context *ctx;
+
+  if ( get_el_context(tin, &ctx) )
+  { HistEvent ev;
+    int curr = 0;
+    int rc = FALSE;
+    term_t tail = PL_copy_term_ref(events);
+    term_t head = PL_new_term_ref();
+
+    if ( history(ctx->history, &ev, H_CURR) == 0 )
+      curr = ev.num;
+
+    if ( history(ctx->history, &ev, H_FIRST) == 0 )
+    { if ( !append_ev(tail, head, &ev) )
+	goto out;
+    }
+    while(history(ctx->history, &ev, H_NEXT) == 0)
+    { if ( !append_ev(tail, head, &ev) )
+	goto out;
+    }
+    rc = PL_unify_nil(tail);
+
+  out:
+    history(ctx->history, &ev, H_SET, curr);
+
+    return rc;
+  }
+
+  return FALSE;
+}
+
+
+static int
+get_int_arg(int i, term_t t, int *v)
+{ term_t a;
+
+  if ( (a=PL_new_term_ref()) &&
+       PL_get_arg(i, t, a) &&
+       PL_get_integer_ex(a, v) )
+    return TRUE;
+
+  return FALSE;
+}
+
+static int
+get_bool_arg(int i, term_t t, int *v)
+{ term_t a;
+
+  if ( (a=PL_new_term_ref()) &&
+       PL_get_arg(i, t, a) &&
+       PL_get_bool_ex(a, v) )
+    return TRUE;
+
+  return FALSE;
+}
+
+
+
+static foreign_t
+pl_history(term_t tin, term_t option)
+{ el_context *ctx;
+
+  if ( get_el_context(tin, &ctx) )
+  { atom_t name;
+    size_t arity;
+    int rc = 0;
+
+    if ( PL_get_name_arity(option, &name, &arity) )
+    { HistEvent ev;
+
+      if ( name == ATOM_setsize )
+      { int s;
+	if ( arity != 1 ) goto err_domain;
+	if ( !get_int_arg(1, option, &s) ) return FALSE;
+	rc = history(ctx->history, &ev, H_SETSIZE);
+      } else if ( name == ATOM_clear )
+      { if ( arity != 0 ) goto err_domain;
+
+	rc = history(ctx->history, &ev, H_CLEAR);
+      } else if ( name == ATOM_setunique )
+      { int u;
+	if ( arity != 1 ) goto err_domain;
+	if ( !get_bool_arg(1, option, &u) ) return FALSE;
+	rc = history(ctx->history, &ev, H_SETUNIQUE, u);
+      } else
+      { err_domain:
+	return PL_domain_error("history_action", option);
+      }
+
+      if ( rc == 0 )
+	return TRUE;
+
+      return FALSE;				/* What exception? */
+    }
+
+    return PL_type_error("callable", option);
+  }
+
+  return FALSE;
+}
+
+
+
 		 /*******************************
 		 *	   REGISTRATION		*
 		 *******************************/
@@ -1284,9 +1404,13 @@ install_libedit4pl(void)
   MKATOM(redisplay);
   MKATOM(error);
   MKATOM(fatal);
+  MKATOM(clear);
+  MKATOM(setsize);
+  MKATOM(setunique);
 
   MKFUNCTOR(line, 2);
   MKFUNCTOR(electric, 3);
+  FUNCTOR_pair2 = PL_new_functor(PL_new_atom("-"), 2);
 
   PL_register_foreign("el_wrap",	  4, pl_wrap,	       0);
   PL_register_foreign("el_wrapped",	  1, pl_is_wrapped,    0);
@@ -1301,4 +1425,6 @@ install_libedit4pl(void)
   PL_register_foreign("el_add_history",	  2, pl_add_history,   0);
   PL_register_foreign("el_write_history", 2, pl_write_history, 0);
   PL_register_foreign("el_read_history",  2, pl_read_history,  0);
+  PL_register_foreign("el_history_events",2, pl_history_events,0);
+  PL_register_foreign("el_history",       2, pl_history,       0);
 }

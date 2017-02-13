@@ -564,8 +564,13 @@ read_char(EditLine *el, el_char_t *cp)
 	el_set(el, EL_REFRESH);
         goto again;
       case SIGWINCH:
+      { FILE *err;
+	el_get(ctx->el, EL_GETFP, 2, &err);
 	el_resize(el);
+	fprintf(err, "\r");
+        el_set(el, EL_REFRESH);
 	goto again;
+      }
       default:
 	break;
     }

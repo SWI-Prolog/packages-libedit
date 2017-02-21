@@ -126,6 +126,7 @@ typedef struct el_context
   IOFUNCTIONS	        functions;	/* SIO function block */
   command	       *commands;	/* User commands */
   binding	       *bindings;	/* Bindings to user commands */
+  int			reader;		/* Current reader thread */
   struct
   { int timeout;			/* Time to wait */
     int move;				/* Amount to move */
@@ -158,6 +159,22 @@ get_context_from_handle(void *handle)
   { IOSTREAM *s;
 
     if ( (s=c->istream) && s->handle == handle )
+      return c;
+  }
+
+  return NULL;
+}
+
+static el_context *
+get_context_from_ohandle(void *handle)
+{ el_context *c;
+
+  for(c=el_clist; c; c=c->next)
+  { IOSTREAM *s;
+
+    if ( (s=c->ostream) && s->handle == handle )
+      return c;
+    if ( (s=c->estream) && s->handle == handle )
       return c;
   }
 
@@ -500,6 +517,30 @@ read__fixio(int fd, int e)
   }
 }
 
+static ssize_t
+do_read(el_context *ctx, int fd, char *buf, size_t size)
+{ ssize_t rc;
+  int oreader = ctx->reader;
+
+  ctx->reader = PL_thread_self();
+  rc = read(fd, buf, size);
+  ctx->reader = oreader;
+
+  return rc;
+}
+
+
+static void
+refresh(el_context *ctx)
+{ FILE *err;
+
+  el_get(ctx->el, EL_GETFP, 2, &err);
+  el_resize(ctx->el);
+  fprintf(err, "\r");
+  el_set(ctx->el, EL_REFRESH);
+}
+
+
 #ifdef HAVE_EL_WSET
 #define el_char_t wchar_t
 #else
@@ -556,21 +597,16 @@ read_char(EditLine *el, el_char_t *cp)
     return -1;
   }
 
-  while ((num_read = read(fileno(in), cbuf + cbp, (size_t)1)) == -1) {
-    int e = errno;
+  while ( (num_read = do_read(ctx, fileno(in), cbuf + cbp, (size_t)1)) == -1 )
+  { int e = errno;
 
     switch (ctx->sig_no)
     { case SIGCONT:
 	el_set(el, EL_REFRESH);
         goto again;
       case SIGWINCH:
-      { FILE *err;
-	el_get(ctx->el, EL_GETFP, 2, &err);
-	el_resize(el);
-	fprintf(err, "\r");
-        el_set(el, EL_REFRESH);
+	refresh(ctx);
 	goto again;
-      }
       default:
 	break;
     }
@@ -589,6 +625,9 @@ read_char(EditLine *el, el_char_t *cp)
       return -1;
     }
   }
+
+  if ( ctx->sig_no == SIGWINCH )
+    refresh(ctx);
 
   /* Test for EOF */
   if ( num_read == 0 )
@@ -690,6 +729,25 @@ Sread_libedit(void *handle, char *buf, size_t size)
 }
 
 
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+The write handler  is  defined  to   deal  with  writes  from background
+threads.
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+static ssize_t
+Swrite_libedit(void *handle, char *buf, size_t size)
+{ el_context *ctx = get_context_from_ohandle(handle);
+
+  if ( ctx->reader &&
+       ctx->reader != PL_thread_self() )
+  { // fprintf(stderr, "background write %p\n", ctx);
+    ctx->sig_no = SIGWINCH;			/* simulate a window change */
+  }
+
+  return (*ctx->orig_functions->write)(handle, buf, size);
+}
+
+
 static char *
 prompt(EditLine *el)
 { el_context *ctx;
@@ -749,12 +807,13 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr)
       el_set( ctx->el, EL_CLIENTDATA, ctx);
       electric_init(ctx->el);
 
-      ctx->orig_functions = in->functions;
-      ctx->functions      = *in->functions;
-      ctx->functions.read = Sread_libedit;
+      ctx->orig_functions  = in->functions;
+      ctx->functions       = *in->functions;
+      ctx->functions.read  = Sread_libedit;
+      ctx->functions.write = Swrite_libedit;
 
       in->functions  = &ctx->functions;
-      out->functions = &ctx->functions;		/* Why? */
+      out->functions = &ctx->functions;
       err->functions = &ctx->functions;
 
       rc = TRUE;

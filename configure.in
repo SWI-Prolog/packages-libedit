@@ -30,6 +30,12 @@ case "$PLARCH" in
 	;;
 esac
 
+dnl On some platforms (e.g., OpenBSD), ncurses needs to be linked
+dnl seperately.
+AC_CHECK_LIB(ncursesw, main)
+if test ! "$ac_cv_lib_ncursesw_main" = "yes"; then
+  AC_CHECK_LIB(ncurses, main)
+fi
 
 if test ! -z "$LIBEDITPREFIX"; then
   AC_MSG_CHECKING(Whether setting for LIBEDITPREFIX is ok)

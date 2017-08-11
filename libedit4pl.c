@@ -523,7 +523,9 @@ do_read(el_context *ctx, int fd, char *buf, size_t size)
   int oreader = ctx->reader;
 
   ctx->reader = PL_thread_self();
-  rc = read(fd, buf, size);
+  do
+  { rc = read(fd, buf, size);
+  } while ( rc < 0 && errno == EINTR );
   ctx->reader = oreader;
 
   return rc;

@@ -359,10 +359,16 @@ el_sighandler(int sig)
 static const char *
 el_siggets(EditLine *el, int *count)
 { const char *line;
+  FILE *in;
 
-  prepare_signals(el_signals);
-  line = el_gets(el, count);
-  restore_signals(el_signals);
+  el_get(el, EL_GETFP, 0, &in);
+  if ( fileno(in) == 0 )
+  { prepare_signals(el_signals);
+    line = el_gets(el, count);
+    restore_signals(el_signals);
+  } else
+  { line = el_gets(el, count);
+  }
 
   return line;
 }

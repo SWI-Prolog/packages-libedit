@@ -118,6 +118,7 @@ typedef struct el_context
   IOSTREAM	       *ostream;	/* Output stream */
   IOSTREAM	       *estream;	/* Error stream */
   EditLine	       *el;		/* EditLine context */
+  char *		buffered;	/* Buffered long line */
   int			sig_no;		/* For read_char() */
   HistEvent		ev;		/* History event */
   History	       *history;	/* Complete history */
@@ -695,11 +696,55 @@ read_char(EditLine *el, el_char_t *cp)
 		 *	    IO FUNCTIONS	*
 		 *******************************/
 
+#define ISUTF8_CB(c) (((c)&0xc0) == 0x80)
+
+/* Find the longest prefix of `in` upto `len` of complete
+   UTF-8 characters.
+*/
+
+static size_t
+utf8_chars(const char *in, size_t len)
+{ const char *e = &in[len];
+
+  while ( e > in && ISUTF8_CB(e[-1]) )
+    e--;
+
+  return e-in;
+}
+
+
+static size_t
+send_one_buffer(el_context *ctx, const char *line, char *buf, size_t size)
+{ size_t linelen = strlen(line);
+
+  if ( linelen <= size )
+  { memcpy(buf, line, linelen);
+    ctx->buffered = NULL;
+    return linelen;
+  } else
+  { size_t slen = utf8_chars(line, size);
+
+    memcpy(buf, line, slen);
+    if ( (ctx->buffered = strdup(&line[slen])) )
+      return slen;
+    return -1;				/* ENOMEM */
+  }
+}
+
+
 static ssize_t
 Sread_libedit(void *handle, char *buf, size_t size)
 { el_context *ctx = get_context_from_handle(handle);
   int ttymode = PL_ttymode(ctx->istream);
   int rval;
+
+  if ( ctx->buffered )
+  { char *old = ctx->buffered;
+    size_t slen = send_one_buffer(ctx, old, buf, size);
+
+    free(old);
+    return slen;
+  }
 
   switch( ttymode )
   { case PL_RAWTTY:			/* get_single_char/1 */
@@ -714,19 +759,12 @@ Sread_libedit(void *handle, char *buf, size_t size)
     }
     case PL_COOKEDTTY:
     default:
-    { const char *line;
-      int len;
+    { int len;
+      const char *line;
 
       update_prompt(ctx);
       if ( (line = el_siggets(ctx->el, &len)) && len > 0 )
-      { size_t linelen = strlen(line);
-
-	if ( linelen <= size )
-	{ memcpy(buf, line, linelen);
-	  return linelen;
-	} else
-	{ assert(0);				/* TBD: buffer */
-	}
+      { return send_one_buffer(ctx, line, buf, size);
       } else if ( len == 0 )
       { return 0;
       } else

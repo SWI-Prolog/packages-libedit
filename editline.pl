@@ -518,7 +518,7 @@ list_alternatives(Alternatives) :-
     max_list(Lengths, Max),
     tty_size(_, Cols),
     ColW is Max+2,
-    Columns is Cols // ColW,
+    Columns is max(1, Cols // ColW),
     RowCount is (Count+Columns-1)//Columns,
     length(Rows, RowCount),
     to_matrix(Alternatives, Rows, Rows),

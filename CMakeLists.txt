@@ -3,7 +3,8 @@ project(swipl-libedit)
 
 include("../cmake/PrologPackage.cmake")
 
-include(FindLibedit)
+find_package(Libedit)
+if(LIBEDIT_FOUND)
 set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} ${LIBEDIT_LIBRARIES})
 
 set(PKG_LIBEDIT_PL editline.pl)
@@ -31,3 +32,4 @@ install(TARGETS libedit4pl
 	LIBRARY DESTINATION ${SWIPL_INSTALL_MODULES})
 install(FILES ${PKG_LIBEDIT_PL}
 	DESTINATION ${SWIPL_INSTALL_LIBRARY})
+endif(LIBEDIT_FOUND)

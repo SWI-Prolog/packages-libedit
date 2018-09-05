@@ -15,6 +15,7 @@ configure_file(config.h.cmake config.h)
 swipl_plugin(
     libedit4pl
     C_SOURCES libedit4pl.c
+    C_LIBS ${LIBEDIT_LIBRARIES}
     PL_LIBS editline.pl)
 
 endif(LIBEDIT_FOUND)

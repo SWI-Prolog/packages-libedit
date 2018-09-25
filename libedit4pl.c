@@ -762,6 +762,8 @@ Sread_libedit(void *handle, char *buf, size_t size)
     { int len;
       const char *line;
 
+      if ( ctx->ostream )
+	Sflush(ctx->ostream);
       update_prompt(ctx);
       if ( (line = el_siggets(ctx->el, &len)) && len > 0 )
       { return send_one_buffer(ctx, line, buf, size);

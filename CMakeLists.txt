@@ -17,6 +17,9 @@ swipl_plugin(
     C_SOURCES libedit4pl.c
     C_LIBS ${LIBEDIT_LIBRARIES}
     PL_LIBS editline.pl)
+target_include_directories(
+    plugin_libedit4pl BEFORE PRIVATE
+    ${LIBEDIT_INCLUDE_DIR})
 
 pkg_doc(libedit
 	SECTION

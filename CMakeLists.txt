@@ -13,7 +13,8 @@ AC_CHECK_FUNCS(el_cursor el_wset poll)
 configure_file(config.h.cmake config.h)
 
 swipl_plugin(
-    libedit4pl
+    libedit
+    MODULE libedit4pl
     C_SOURCES libedit4pl.c
     C_LIBS ${LIBEDIT_LIBRARIES}
     C_INCLUDE_DIR ${LIBEDIT_INCLUDE_DIR}

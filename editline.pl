@@ -57,7 +57,16 @@
 :- use_module(library(apply)).
 :- use_module(library(lists)).
 
+editline_ok :-
+    \+ current_prolog_flag(console_menu_version, qt),
+    \+ current_prolog_flag(readline, readline),
+    stream_property(user_input, tty(true)).
+
 :- use_foreign_library(foreign(libedit4pl)).
+
+:- if(editline_ok).
+:- initialization el_wrap.
+:- endif.
 
 :- meta_predicate
     el_addfn(+,+,+,3).
@@ -73,9 +82,6 @@ provides a high level API to enable   command line editing on the Prolog
 user streams and low level predicates  to   apply  the  library on other
 streams and program the library.
 */
-
-:- initialization
-    el_wrap.
 
 %!  el_wrap is det.
 %

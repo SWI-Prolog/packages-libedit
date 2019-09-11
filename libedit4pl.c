@@ -265,6 +265,7 @@ static sigstate el_signals[] =
   { SIGTERM },
   { SIGQUIT },
   { SIGWINCH },
+  { SIGUSR2 },				/* SWI-Prolog thread alert */
   { -1 }
 };
 
@@ -530,9 +531,7 @@ do_read(el_context *ctx, int fd, char *buf, size_t size)
   int oreader = ctx->reader;
 
   ctx->reader = PL_thread_self();
-  do
-  { rc = read(fd, buf, size);
-  } while ( rc < 0 && errno == EINTR );
+  rc = read(fd, buf, size);
   ctx->reader = oreader;
 
   return rc;
@@ -624,6 +623,8 @@ read_char(EditLine *el, el_char_t *cp)
       *cp = (el_char_t)'\0';
       return -1;
     }
+    if ( errno == EINTR )
+      continue;
 
     if ( !tried && read__fixio(fileno(in), e) == 0 )
     { errno = save_errno;

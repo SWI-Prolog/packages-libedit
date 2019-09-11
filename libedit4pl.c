@@ -623,7 +623,7 @@ read_char(EditLine *el, el_char_t *cp)
       *cp = (el_char_t)'\0';
       return -1;
     }
-    if ( errno == EINTR )
+    if ( e == EINTR )
       continue;
 
     if ( !tried && read__fixio(fileno(in), e) == 0 )

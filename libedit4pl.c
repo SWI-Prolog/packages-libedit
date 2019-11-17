@@ -1327,6 +1327,59 @@ pl_deletestr(term_t tin, term_t count)
   return FALSE;
 }
 
+static foreign_t
+pl_getc(term_t tin, term_t c)
+{ el_context *ctx;
+
+  if ( get_el_context(tin, &ctx) )
+  { wchar_t wc;
+    switch(el_wgetc(ctx->el, &wc))
+    { case 1:
+	return PL_unify_integer(c, wc);
+      case 0:
+	return PL_unify_integer(c, -1);
+      case -1:
+      default:
+	Sdprintf("el_getc(): I/O error\n");
+	return PL_unify_integer(c, -1);
+    }
+  }
+
+  return FALSE;
+}
+
+static foreign_t
+pl_push(term_t tin, term_t c)
+{ el_context *ctx;
+  int ic;
+
+  if ( PL_get_char_ex(c, &ic, FALSE) &&
+       get_el_context(tin, &ctx) )
+  { wchar_t wc[2];
+    wc[0] = ic;
+    wc[1] = 0;
+    el_wpush(ctx->el, wc);
+
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
+static foreign_t
+pl_editmode(term_t tin, term_t on)
+{ el_context *ctx;
+  int m;
+
+  if ( PL_get_bool_ex(on, &m) &&
+       get_el_context(tin, &ctx) )
+  { el_set(ctx->el, EL_EDITMODE, m);
+
+    return TRUE;
+  }
+
+  return FALSE;
+}
 
 
 		 /*******************************
@@ -1540,4 +1593,7 @@ install_libedit4pl(void)
   PL_register_foreign("el_read_history",  2, pl_read_history,  0);
   PL_register_foreign("el_history_events",2, pl_history_events,0);
   PL_register_foreign("el_history",       2, pl_history,       0);
+  PL_register_foreign("el_getc",          2, pl_getc,          0);
+  PL_register_foreign("el_push",          2, pl_push,          0);
+  PL_register_foreign("el_editmode",      2, pl_editmode,      0);
 }

@@ -3,8 +3,8 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (c)  2017, VU University Amsterdam
-                         CWI Amsterdam
+    Copyright (c)  2017-2019, VU University Amsterdam
+                              CWI Amsterdam
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -56,6 +56,7 @@
 :- use_module(library(console_input)).
 :- use_module(library(apply)).
 :- use_module(library(lists)).
+:- use_module(library(solution_sequences)).
 
 editline_ok :-
     \+ current_prolog_flag(console_menu_version, qt),
@@ -108,8 +109,11 @@ add_prolog_commands(Input) :-
     el_addfn(Input, complete, 'Complete atoms and files', complete),
     el_addfn(Input, show_completions, 'List completions', show_completions),
     el_addfn(Input, electric, 'Indicate matching bracket', electric),
+    el_addfn(Input, isearch_history, 'Incremental search in history',
+             isearch_history),
     el_bind(Input, ["^I",  complete]),
     el_bind(Input, ["^[?", show_completions]),
+    el_bind(Input, ["^R",  isearch_history]),
     bind_electric(Input),
     el_source(Input, _).
 
@@ -573,3 +577,84 @@ make_format(N, ColW, Format) :-
     append(LF, ['~w~n'], Parts),
     atomics_to_string(Parts, Format).
 
+
+		 /*******************************
+		 *             SEARCH		*
+		 *******************************/
+
+%!  isearch_history(+Input, +Char, -Continue) is det.
+%
+%   Incremental search through the history.  The behavior is based
+%   on GNU readline.
+
+isearch_history(Input, _Char, Continue) :-
+    el_line(Input, line(Before, After)),
+    string_concat(Before, After, Current),
+    string_length(Current, Len),
+    search_print('', "", Current),
+    search(Input, "", Current, 1, Line),
+    el_deletestr(Input, Len),
+    el_insertstr(Input, Line),
+    Continue = redisplay.
+
+search(Input, For, Current, Nth, Line) :-
+    el_getc(Input, Next),
+    Next \== -1,
+    !,
+    search(Next, Input, For, Current, Nth, Line).
+search(_Input, _For, _Current, _Nth, "").
+
+search(7, _Input, _, Current, _, Current) :-    % C-g: abort
+    !,
+    clear_line.
+search(18, Input, For, Current, Nth, Line) :-   % C-r: search previous
+    !,
+    N2 is Nth+1,
+    search_(Input, For, Current, N2, Line).
+search(19, Input, For, Current, Nth, Line) :-   % C-s: search next
+    !,
+    N2 is max(1,Nth-1),
+    search_(Input, For, Current, N2, Line).
+search(127, Input, For, Current, _Nth, Line) :- % DEL/BS: shorten search
+    sub_string(For, 0, _, 1, For1),
+    !,
+    search_(Input, For1, Current, 1, Line).
+search(Char, Input, For, Current, Nth, Line) :-
+    code_type(Char, cntrl),
+    !,
+    search_end(Input, For, Current, Nth, Line),
+    el_push(Input, Char).
+search(Char, Input, For, Current, _Nth, Line) :-
+    format(string(For1), '~w~c', [For,Char]),
+    search_(Input, For1, Current, 1, Line).
+
+search_(Input, For1, Current, Nth, Line) :-
+    (   find_in_history(Input, For1, Current, Nth, Candidate)
+    ->  search_print('', For1, Candidate)
+    ;   search_print('failed ', For1, Current)
+    ),
+    search(Input, For1, Current, Nth, Line).
+
+search_end(Input, For, Current, Nth, Line) :-
+    (   find_in_history(Input, For, Current, Nth, Line)
+    ->  true
+    ;   Line = Current
+    ),
+    clear_line.
+
+find_in_history(_, "", Current, _, Current) :-
+    !.
+find_in_history(Input, For, _, Nth, Line) :-
+    el_history_events(Input, History),
+    call_nth(( member(_N-Line, History),
+               sub_string(Line, _, _, _, For)
+             ),
+             Nth),
+    !.
+
+search_print(State, Search, Current) :-
+    format(user_error, '\r(~wreverse-i-search)`~w\': ~w\e[0K',
+           [State, Search, Current]).
+
+clear_line :-
+    format(user_error, '\r\e[0K', []).

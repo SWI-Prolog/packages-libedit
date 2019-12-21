@@ -918,7 +918,7 @@ get_el_context(term_t tin, el_context **ctxp)
     { rc = PL_domain_error("libedit_input", tin);
     }
 
-    PL_release_stream(in);
+    PL_release_stream_noerror(in);
   }
 
   return rc;

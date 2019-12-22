@@ -894,7 +894,7 @@ pl_is_wrapped(term_t tin)
     else
       rc = FALSE;
 
-    PL_release_stream(in);
+    PL_release_stream_noerror(in);
   }
 
   return rc;

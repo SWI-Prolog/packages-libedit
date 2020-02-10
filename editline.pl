@@ -3,7 +3,7 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (c)  2017-2019, VU University Amsterdam
+    Copyright (c)  2017-2020, VU University Amsterdam
                               CWI Amsterdam
     All rights reserved.
 
@@ -53,10 +53,11 @@
             el_write_history/2,                 % +Input, +FileName
             el_read_history/2                   % +Input, +FileName
           ]).
-:- use_module(library(console_input)).
-:- use_module(library(apply)).
-:- use_module(library(lists)).
-:- use_module(library(solution_sequences)).
+:- autoload(library(apply),[maplist/2,maplist/3]).
+:- autoload(library(lists),[reverse/2,max_list/2,append/3,member/2]).
+:- autoload(library(shlib),[use_foreign_library/1]).
+:- autoload(library(solution_sequences),[call_nth/2]).
+
 
 editline_ok :-
     \+ current_prolog_flag(console_menu_version, qt),
@@ -73,7 +74,8 @@ editline_ok :-
     el_addfn(+,+,+,3).
 
 :- multifile
-    el_setup/1.                         % +Input
+    el_setup/1,                         % +Input
+    prolog:complete_input/4.
 
 
 /** <module> BSD libedit based command line editing
@@ -422,6 +424,7 @@ skip_code -->
 
 complete(Input, _Char, Continue) :-
     el_line(Input, line(Before, After)),
+    ensure_input_completion,
     prolog:complete_input(Before, After, Delete, Completions),
     (   Completions = [One]
     ->  string_length(Delete, Len),
@@ -449,6 +452,25 @@ complete(Input, _Char, Continue) :-
             Continue = refresh
         )
     ).
+
+:- dynamic
+    input_completion_loaded/0.
+
+ensure_input_completion :-
+    input_completion_loaded,
+    !.
+ensure_input_completion :-
+    predicate_property(prolog:complete_input(_,_,_,_),
+                       number_of_clauses(N)),
+    N > 0,
+    !.
+ensure_input_completion :-
+    exists_source(library(console_input)),
+    !,
+    use_module(library(console_input), []),
+    asserta(input_completion_loaded).
+ensure_input_completion.
+
 
 %!  show_completions(+Input, +Char, -Continue) is det.
 %

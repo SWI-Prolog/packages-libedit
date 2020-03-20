@@ -55,7 +55,6 @@
           ]).
 :- autoload(library(apply),[maplist/2,maplist/3]).
 :- autoload(library(lists),[reverse/2,max_list/2,append/3,member/2]).
-:- autoload(library(shlib),[use_foreign_library/1]).
 :- autoload(library(solution_sequences),[call_nth/2]).
 
 

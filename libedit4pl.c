@@ -35,7 +35,6 @@
 
 #include <string.h>
 #include <stdlib.h>
-#define PL_ARITY_AS_SIZE 1
 #include <SWI-Stream.h>
 #include <SWI-Prolog.h>
 #include <config.h>

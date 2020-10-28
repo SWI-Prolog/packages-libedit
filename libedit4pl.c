@@ -247,6 +247,7 @@ This code is copied from our GNU libreadline wrapper.
 
 typedef struct
 { int			signo;		/* number of the signal */
+  int			prepared;	/* Is currently prepared */
   struct sigaction	old_state;	/* old state for the signal */
 } sigstate;
 
@@ -280,11 +281,14 @@ static sigstate cont_signals[] =
 static void
 prepare_signals(sigstate *s)
 { for(; s->signo != -1; s++)
-  { struct sigaction new;
+  { if ( !s->prepared )
+    { struct sigaction new;
 
-    memset(&new, 0, sizeof(new));
-    new.sa_handler = el_sighandler;
-    sigaction(s->signo, &new, &s->old_state);
+      memset(&new, 0, sizeof(new));
+      new.sa_handler = el_sighandler;
+      sigaction(s->signo, &new, &s->old_state);
+      s->prepared = TRUE;
+    }
   }
 }
 
@@ -293,6 +297,7 @@ static void
 restore_signals(sigstate *s)
 { for(; s->signo != -1; s++)
   { sigaction(s->signo, &s->old_state, NULL);
+    s->prepared = FALSE;
   }
 }
 

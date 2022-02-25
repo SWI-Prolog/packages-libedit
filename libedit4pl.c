@@ -241,6 +241,8 @@ el_cursor_emulated(EditLine *el, int count)
 		 *	  SIGNAL HANDLING	*
 		 *******************************/
 
+#ifdef O_SIGNALS
+
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 This code is copied from our GNU libreadline wrapper.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
@@ -378,6 +380,12 @@ el_siggets(EditLine *el, int *count)
 
   return line;
 }
+
+#else /* O_SIGNALS */
+
+#define el_siggets(el, count) el_gets(el, count)
+
+#endif /* O_SIGNALS */
 
 		 /*******************************
 		 *     ELECTRIC CARET SUPPORT	*

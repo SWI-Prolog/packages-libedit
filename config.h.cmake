@@ -7,3 +7,5 @@
 #cmakedefine HAVE_EL_CURSOR
 #cmakedefine HAVE_EL_WSET
 #cmakedefine HAVE_POLL
+
+#cmakedefine O_SIGNALS

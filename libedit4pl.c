@@ -96,7 +96,7 @@ typedef struct command
 
 typedef struct binding
 { struct binding       *next;
-  int		        ch;
+  int			ch;
   command	       *command;
 } binding;
 
@@ -123,7 +123,7 @@ typedef struct el_context
   History	       *history;	/* Complete history */
   char		       *prompt;		/* Current prompt */
   IOFUNCTIONS	       *orig_functions;	/* Original functions */
-  IOFUNCTIONS	        functions;	/* SIO function block */
+  IOFUNCTIONS		functions;	/* SIO function block */
   command	       *commands;	/* User commands */
   binding	       *bindings;	/* Bindings to user commands */
   int			reader;		/* Current reader thread */
@@ -208,7 +208,7 @@ update_prompt(el_context *ctx)
 
 
 		 /*******************************
-		 *	        PORT		*
+		 *		PORT		*
 		 *******************************/
 
 #ifndef HAVE_EL_CURSOR
@@ -598,12 +598,12 @@ read_char(EditLine *el, el_char_t *cp)
     { case E_WAIT:				/* "^[" */
 	ctx->electric.state = E_COMMAND;
 	wait_on_fd(fileno(in), ctx->electric.timeout);
-        *cp = (el_char_t)'\e';
+	*cp = (el_char_t)27;			/* ESC */
 	return 1;
       case E_COMMAND:
 	ctx->electric.state = E_NONE;
 	*cp = (el_char_t)'\1';			/* "^A" */
-        return 1;
+	return 1;
       case E_NONE:
 	break;
     }
@@ -623,7 +623,7 @@ read_char(EditLine *el, el_char_t *cp)
     switch (ctx->sig_no)
     { case SIGCONT:
 	el_set(el, EL_REFRESH);
-        goto again;
+	goto again;
       case SIGWINCH:
 	refresh(ctx);
 	goto again;
@@ -1024,13 +1024,13 @@ get_key(const char *s, int *k)
       switch(s[1])
       { case 'a': *k = '\a'; break;
 	case 'b': *k = '\b'; break;
-	case 'e': *k = '\e'; break;
+	case 'e': *k =   27; break; /* ESC */
 	case 'f': *k = '\f'; break;
 	case 'n': *k = '\n'; break;
 	case 'r': *k = '\r'; break;
 	case 't': *k = '\r'; break;
 	case 'v': *k = '\v'; break;
-        default:
+	default:
 	  if ( isoctal(s[1]) && isoctal(s[2]) && isoctal(s[3]) )
 	  { *k = (octval(s[1]) << 6) + (octval(s[2]) << 3) + octval(s[3]);
 	    break;
@@ -1226,40 +1226,40 @@ pl_bind(term_t tin, term_t options)
     switch(ac)
     { case 0:
 	rc = el_set(ctx->el, EL_BIND, NULL);
-        break;
+	break;
       case 1:
 	rc = el_set(ctx->el, EL_BIND, av[0], NULL);
-        break;
+	break;
       case 2:
 	if ( !bind_command(ctx, av[0], av[1]) )
 	  return FALSE;
 	rc = el_set(ctx->el, EL_BIND, av[0], av[1], NULL);
-        break;
+	break;
       case 3:
 	rc = el_set(ctx->el, EL_BIND, av[0], av[1], av[2], NULL);
-        break;
+	break;
       case 4:
 	rc = el_set(ctx->el, EL_BIND, av[0], av[1], av[2], av[3], NULL);
-        break;
+	break;
       case 5:
 	rc = el_set(ctx->el, EL_BIND, av[0], av[1], av[2], av[3], av[4], NULL);
-        break;
+	break;
       case 6:
 	rc = el_set(ctx->el, EL_BIND, av[0], av[1], av[2], av[3], av[4],
 				      av[5], NULL);
-        break;
+	break;
       case 7:
 	rc = el_set(ctx->el, EL_BIND, av[0], av[1], av[2], av[3], av[4],
 				      av[5], av[6], NULL);
-        break;
+	break;
       case 8:
 	rc = el_set(ctx->el, EL_BIND, av[0], av[1], av[2], av[3], av[4],
 				      av[5], av[6], av[7], NULL);
-        break;
+	break;
       case 9:
 	rc = el_set(ctx->el, EL_BIND, av[0], av[1], av[2], av[3], av[4],
 				      av[5], av[6], av[7], av[8], NULL);
-        break;
+	break;
       default:
 	assert(0);
     }
@@ -1301,7 +1301,7 @@ pl_line(term_t tin, term_t line)
 	     PL_unify_chars(after, PL_STRING|REP_MB,
 			    li->lastchar - li->cursor, li->cursor) &&
 	     PL_unify_term(line, PL_FUNCTOR, FUNCTOR_line2,
-			           PL_TERM, before,
+				   PL_TERM, before,
 				   PL_TERM, after)
 	   );
   }

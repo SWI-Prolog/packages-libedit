@@ -913,12 +913,16 @@ pl_is_wrapped(term_t tin)
 }
 
 
+#ifndef SIO_TRYLOCK		    /* SWI-Prolog 9.3.13 */
+#define SIO_TRYLOCK 0
+#endif
+
 static int
 get_el_context(term_t tin, el_context **ctxp)
 { IOSTREAM *in;
   int rc;
 
-  if ( (rc=PL_get_stream(tin, &in, SIO_INPUT)) )
+  if ( (rc=PL_get_stream(tin, &in, SIO_INPUT|SIO_TRYLOCK)) )
   { int fd;
     el_context *ctx;
 

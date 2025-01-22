@@ -3,8 +3,9 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (c)  2017-2020, VU University Amsterdam
+    Copyright (c)  2017-2025, VU University Amsterdam
                               CWI Amsterdam
+                              SWI-Prolog Solutions b.v.
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -56,7 +57,9 @@
 :- autoload(library(apply),[maplist/2,maplist/3]).
 :- autoload(library(lists),[reverse/2,max_list/2,append/3,member/2]).
 :- autoload(library(solution_sequences),[call_nth/2]).
-
+:- if(current_prolog_flag(gui, true)).
+:- autoload(library(pce), [get/3, in_pce_thread_sync/1]).
+:- endif.
 
 editline_ok :-
     \+ current_prolog_flag(console_menu_version, qt),
@@ -116,6 +119,7 @@ add_prolog_commands(Input) :-
     el_bind(Input, ["^[?", show_completions]),
     el_bind(Input, ["^R",  isearch_history]),
     bind_electric(Input),
+    add_paste_quoted(Input),
     el_source(Input, _).
 
 %!  el_wrap(+ProgName:atom, +In:stream, +Out:stream, +Error:stream) is det.
@@ -679,3 +683,72 @@ search_print(State, Search, Current) :-
 
 clear_line :-
     format(user_error, '\r\e[0K', []).
+
+
+                /*******************************
+                *         PASTE QUOTED         *
+                *******************************/
+
+:- if(current_prolog_flag(gui, true)).
+
+:- meta_predicate
+    with_quote_flags(+,+,0).
+
+add_paste_quoted(Input) :-
+    el_addfn(Input, paste_quoted, 'Paste as quoted atom', paste_quoted),
+    el_bind(Input, ["^Y",  paste_quoted]).
+
+%!  paste_quoted(+Input, +Char, -Continue) is det.
+%
+%   Paste the selection as quoted Prolog value.   The quoting type
+%   depends on the quote before the caret.  If there is no quote
+%   before the caret we paste as an atom.
+
+paste_quoted(Input, _Char, Continue) :-
+    clipboard_content(String),
+    quote_text(Input, String, Quoted),
+    el_insertstr(Input, Quoted),
+    Continue = refresh.
+
+quote_text(Input, String, Value) :-
+    el_line(Input, line(Before, _After)),
+    (   sub_string(Before, _, 1, 0, Quote)
+    ->  true
+    ;   Quote = "'"
+    ),
+    quote_text(Input, Quote, String, Value).
+
+quote_text(Input, "'", Text, Quoted) =>
+    format(string(Quoted), '~q', [Text]),
+    el_deletestr(Input, 1).
+quote_text(Input, "\"", Text, Quoted) =>
+    atom_string(Text, String),
+    with_quote_flags(
+        string, codes,
+        format(string(Quoted), '~q', [String])),
+    el_deletestr(Input, 1).
+quote_text(Input, "`", Text, Quoted) =>
+    atom_string(Text, String),
+    with_quote_flags(
+        codes, string,
+        format(string(Quoted), '~q', [String])),
+    el_deletestr(Input, 1).
+quote_text(_, _, Text, Quoted) =>
+    format(string(Quoted), '~q', [Text]).
+
+with_quote_flags(Double, Back, Goal) :-
+    current_prolog_flag(double_quotes, ODouble),
+    current_prolog_flag(back_quotes, OBack),
+    setup_call_cleanup(
+        ( set_prolog_flag(double_quotes, Double),
+          set_prolog_flag(back_quotes, Back) ),
+        Goal,
+        ( set_prolog_flag(double_quotes, ODouble),
+          set_prolog_flag(back_quotes, OBack) )).
+
+clipboard_content(Text) :-
+    in_pce_thread_sync(get(@(display), paste, primary, string(Text))).
+
+:- else.
+add_paste_quoted(_).
+:- endif.

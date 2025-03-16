@@ -57,9 +57,6 @@
 :- autoload(library(apply),[maplist/2,maplist/3]).
 :- autoload(library(lists),[reverse/2,max_list/2,append/3,member/2]).
 :- autoload(library(solution_sequences),[call_nth/2]).
-:- if(current_prolog_flag(gui, true)).
-:- autoload(library(pce), [get/3, in_pce_thread_sync/1]).
-:- endif.
 
 editline_ok :-
     \+ current_prolog_flag(console_menu_version, qt),
@@ -689,14 +686,15 @@ clear_line :-
                 *         PASTE QUOTED         *
                 *******************************/
 
-:- if(current_prolog_flag(gui, true)).
-
 :- meta_predicate
     with_quote_flags(+,+,0).
 
 add_paste_quoted(Input) :-
+    current_prolog_flag(gui, true),
+    !,
     el_addfn(Input, paste_quoted, 'Paste as quoted atom', paste_quoted),
     el_bind(Input, ["^Y",  paste_quoted]).
+add_paste_quoted(_).
 
 %!  paste_quoted(+Input, +Char, -Continue) is det.
 %
@@ -747,8 +745,11 @@ with_quote_flags(Double, Back, Goal) :-
           set_prolog_flag(back_quotes, OBack) )).
 
 clipboard_content(Text) :-
+    (   current_predicate(get/3)
+    ->  true
+    ;   current_prolog_flag(gui, true),
+        use_module(library(pce), [get/3, in_pce_thread_sync/1])
+    ),
+    !,
     in_pce_thread_sync(get(@(display), paste, primary, string(Text))).
-
-:- else.
-add_paste_quoted(_).
-:- endif.
+clipboard_content("").

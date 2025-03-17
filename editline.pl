@@ -58,16 +58,9 @@
 :- autoload(library(lists),[reverse/2,max_list/2,append/3,member/2]).
 :- autoload(library(solution_sequences),[call_nth/2]).
 
-editline_ok :-
-    \+ current_prolog_flag(console_menu_version, qt),
-    \+ current_prolog_flag(readline, readline),
-    stream_property(user_input, tty(true)).
-
 :- use_foreign_library(foreign(libedit4pl)).
 
-:- if(editline_ok).
-:- initialization el_wrap.
-:- endif.
+:- initialization el_wrap_if_ok.
 
 :- meta_predicate
     el_addfn(+,+,+,3).
@@ -84,6 +77,14 @@ provides a high level API to enable   command line editing on the Prolog
 user streams and low level predicates  to   apply  the  library on other
 streams and program the library.
 */
+
+el_wrap_if_ok :-
+    \+ current_prolog_flag(console_menu_version, qt),
+    \+ current_prolog_flag(readline, readline),
+    stream_property(user_input, tty(true)),
+    !,
+    el_wrap.
+el_wrap_if_ok.
 
 %!  el_wrap is det.
 %

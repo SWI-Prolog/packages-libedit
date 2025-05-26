@@ -877,6 +877,13 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr)
       out->functions = &ctx->functions;
       err->functions = &ctx->functions;
 
+      in->position  = &in->posbuf;
+      out->position = &in->posbuf;
+      err->position = &in->posbuf;
+      in->flags  |= SIO_RECORDPOS;
+      out->flags |= SIO_RECORDPOS;
+      err->flags |= SIO_RECORDPOS;
+
       rc = TRUE;
     } else
     { rc = PL_permission_error("el_wrap", "stream", tin);

@@ -924,27 +924,29 @@ pl_is_wrapped(term_t tin)
 #define SIO_TRYLOCK 0
 #endif
 
-static int
+static bool
 get_el_context(term_t tin, el_context **ctxp)
 { IOSTREAM *in;
-  int rc;
+  int fd = -1;
 
-  if ( (rc=PL_get_stream(tin, &in, SIO_INPUT|SIO_TRYLOCK)) )
-  { int fd;
-    el_context *ctx;
-
-    if ( (fd=Sfileno(in)) >= 0 &&
-	 (ctx=get_context(fd)) )
-    { *ctxp = ctx;
-      rc = TRUE;
+  if ( !PL_get_integer(tin, &fd) )
+  { if ( PL_get_stream(tin, &in, SIO_INPUT|SIO_TRYLOCK) )
+    { fd = Sfileno(in);
+      PL_release_stream_noerror(in);
     } else
-    { rc = PL_domain_error("libedit_input", tin);
+    { return false;
     }
-
-    PL_release_stream_noerror(in);
   }
 
-  return rc;
+  if ( fd >= 0 )
+  { el_context *ctx;
+    if ( (ctx=get_context(fd)) )
+    { *ctxp = ctx;
+      return true;
+    }
+  }
+
+  return PL_domain_error("libedit_input", tin);
 }
 
 

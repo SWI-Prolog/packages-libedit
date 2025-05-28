@@ -267,6 +267,13 @@ prolog:history(Input, save(File)) :-
     el_write_history(Input, File).
 prolog:history(Input, load) :-
     el_history_events(Input, Events),
+    load_history_events(Events).
+
+%!  load_history_events(+Events)
+%
+%   Load events into the history handling of `boot/history.pl`
+
+load_history_events(Events) :-
     '$reverse'(Events, RevEvents),
     forall('$member'(Ev, RevEvents),
            add_event(Ev)).

@@ -3,8 +3,9 @@
     Author:        Jan Wielemaker
     E-mail:        J.Wielemaker@vu.nl
     WWW:           http://www.swi-prolog.org
-    Copyright (c)  2017, VU University Amsterdam
-			 CWI, Amsterdam
+    Copyright (c)  2017-2025, VU University Amsterdam
+			      CWI, Amsterdam
+			      SWI-Prolog Solutions b.v.
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -838,10 +839,13 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr)
 	 (fd_err = Sfileno(err)) >= 0 )
     { el_context *ctx = alloc_context(fd_in);
       FILE *fin, *fout, *ferr;
+      int fd_in2  = dup(fd_in);
+      int fd_out2 = dup(fd_out);
+      int fd_err2 = dup(fd_err);
 
-      fin  = fdopen(fd_in, "r");
-      fout = fdopen(fd_out, "w");
-      ferr = fdopen(fd_err, "w");
+      fin  = fdopen(fd_in2, "r");
+      fout = fdopen(fd_out2, "w");
+      ferr = fdopen(fd_err2, "w");
 
       setlinebuf(fin);
       setlinebuf(fout);
@@ -986,6 +990,12 @@ pl_unwrap(term_t tin)
     ctx->estream->functions = ctx->orig_functions;
 
     history_end(ctx->history);
+    for(int i=0; i<=2; i++)
+    { FILE *fd;
+      if ( el_get(ctx->el, EL_GETFP, i, &fd) == 0 )
+	fclose(fd);
+    }
+
     el_end(ctx->el);
 
     /*  FIXME: We should close the FILE*, but fclose() also closes the

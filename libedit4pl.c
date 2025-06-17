@@ -1545,7 +1545,7 @@ pl_history(term_t tin, term_t option)
       { int s;
 	if ( arity != 1 ) goto err_domain;
 	if ( !get_int_arg(1, option, &s) ) return FALSE;
-	rc = history(ctx->history, &ev, H_SETSIZE);
+	rc = history(ctx->history, &ev, H_SETSIZE, s);
       } else if ( name == ATOM_clear )
       { if ( arity != 0 ) goto err_domain;
 

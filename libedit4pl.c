@@ -837,58 +837,63 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr)
     if ( (fd_in  = Sfileno(in))  >= 0 && isatty(fd_in) &&
 	 (fd_out = Sfileno(out)) >= 0 &&
 	 (fd_err = Sfileno(err)) >= 0 )
-    { el_context *ctx = alloc_context(fd_in);
-      FILE *fin, *fout, *ferr;
-      int fd_in2  = dup(fd_in);
-      int fd_out2 = dup(fd_out);
-      int fd_err2 = dup(fd_err);
+    { if ( !get_context(fd_in) )
+      { el_context *ctx = alloc_context(fd_in);
+	FILE *fin, *fout, *ferr;
+	int fd_in2  = dup(fd_in);
+	int fd_out2 = dup(fd_out);
+	int fd_err2 = dup(fd_err);
 
-      fin  = fdopen(fd_in2, "r");
-      fout = fdopen(fd_out2, "w");
-      ferr = fdopen(fd_err2, "w");
+	fin  = fdopen(fd_in2, "r");
+	fout = fdopen(fd_out2, "w");
+	ferr = fdopen(fd_err2, "w");
 
-      setlinebuf(fin);
-      setlinebuf(fout);
-      setbuf(ferr, NULL);
+	setlinebuf(fin);
+	setlinebuf(fout);
+	setbuf(ferr, NULL);
 
-      ctx->istream = in;
-      ctx->ostream = out;
-      ctx->estream = err;
+	ctx->istream = in;
+	ctx->ostream = out;
+	ctx->estream = err;
 
-      ctx->history = history_init();
-      history(ctx->history, &ctx->ev, H_SETSIZE,   100);
-      history(ctx->history, &ctx->ev, H_SETUNIQUE, TRUE);
+	ctx->history = history_init();
+	history(ctx->history, &ctx->ev, H_SETSIZE,   100);
+	history(ctx->history, &ctx->ev, H_SETUNIQUE, TRUE);
 
-      ctx->el = el_init(prog, fin, fout, ferr);
+	ctx->el = el_init(prog, fin, fout, ferr);
 
 #ifdef HAVE_EL_WSET
-      el_wset(ctx->el, EL_GETCFN,     read_char);
+	el_wset(ctx->el, EL_GETCFN,     read_char);
 #else
-      el_set(ctx->el, EL_GETCFN,      read_char);
+	el_set(ctx->el, EL_GETCFN,      read_char);
 #endif
-      el_set( ctx->el, EL_PROMPT,     prompt);
-      el_set( ctx->el, EL_HIST,       history, ctx->history);
-      el_set( ctx->el, EL_EDITOR,     "emacs");
-      el_set( ctx->el, EL_CLIENTDATA, ctx);
-      electric_init(ctx->el);
+	el_set( ctx->el, EL_PROMPT,     prompt);
+	el_set( ctx->el, EL_HIST,       history, ctx->history);
+	el_set( ctx->el, EL_EDITOR,     "emacs");
+	el_set( ctx->el, EL_CLIENTDATA, ctx);
+	electric_init(ctx->el);
 
-      ctx->orig_functions  = in->functions;
-      ctx->functions       = *in->functions;
-      ctx->functions.read  = Sread_libedit;
-      ctx->functions.write = Swrite_libedit;
+	ctx->orig_functions  = in->functions;
+	ctx->functions       = *in->functions;
+	ctx->functions.read  = Sread_libedit;
+	ctx->functions.write = Swrite_libedit;
 
-      in->functions  = &ctx->functions;
-      out->functions = &ctx->functions;
-      err->functions = &ctx->functions;
+	in->functions  = &ctx->functions;
+	out->functions = &ctx->functions;
+	err->functions = &ctx->functions;
 
-      in->position  = &in->posbuf;
-      out->position = &in->posbuf;
-      err->position = &in->posbuf;
-      in->flags  |= SIO_RECORDPOS;
-      out->flags |= SIO_RECORDPOS;
-      err->flags |= SIO_RECORDPOS;
+	in->position  = &in->posbuf;
+	out->position = &in->posbuf;
+	err->position = &in->posbuf;
+	in->flags  |= SIO_RECORDPOS;
+	out->flags |= SIO_RECORDPOS;
+	err->flags |= SIO_RECORDPOS;
 
-      rc = TRUE;
+	rc = TRUE;
+      } else
+      { rc = PL_permission_error("el_wrap", "stream", tin);
+	/* should indicate we are already wrapped */
+      }
     } else
     { rc = PL_permission_error("el_wrap", "stream", tin);
     }

@@ -612,7 +612,7 @@ read_char(EditLine *el, el_char_t *cp)
 
  again:
   ctx->sig_no = 0;
-  if ( !PL_dispatch(fileno(in), PL_DISPATCH_WAIT) )
+  if ( !PL_dispatch(ctx->istream, PL_DISPATCH_WAIT) )
   { Sset_exception(ctx->istream, PL_exception(0));
     *cp = (el_char_t)'\0';
     return -1;
@@ -765,7 +765,7 @@ Sread_libedit(void *handle, char *buf, size_t size)
     case PL_NOTTY:			/* -tty */
     { int fd = Sfileno(ctx->istream);
       PL_write_prompt(ttymode == PL_NOTTY);
-      PL_dispatch(fd, PL_DISPATCH_WAIT);
+      PL_dispatch(ctx->istream, PL_DISPATCH_WAIT);
       rval = read(fd, buf, size);
       if ( rval > 0 && buf[rval-1] == '\n' )
 	PL_prompt_next(fd);

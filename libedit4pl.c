@@ -34,6 +34,7 @@
     POSSIBILITY OF SUCH DAMAGE.
 */
 
+#define SWIPL_WINDOWS_NATIVE_ACCESS 1 /* get Swinhandle() */
 #include <string.h>
 #include <stdlib.h>
 #include <SWI-Stream.h>
@@ -83,6 +84,30 @@ static functor_t FUNCTOR_pair2;
 
 #define STR_OPTIONS (CVT_ATOM|CVT_STRING|CVT_LIST|REP_MB|CVT_EXCEPTION)
 
+		 /*******************************
+		 *           WIN/UNIX           *
+		 *******************************/
+
+#ifdef __WINDOWS__
+
+typedef HANDLE os_handle;
+#define Soshandle(s) Swinhandle(s)
+#define OSNOHANDLE NULL
+#define isatty(fd) isconsole(fd)
+static bool
+isconsole(HANDLE h)
+{ DWORD mode;
+  return GetConsoleMode(h, &mode);
+}
+#undef EL_GETFP			/* avoid accidental use */
+
+#else/*__WINDOWS__*/
+
+typedef int os_handle;
+#define OSNOHANDLE (-1)
+#define Soshandle(s) Sfileno(s)
+
+#endif/*__WINDOWS__*/
 
 		 /*******************************
 		 *	      CONTEXT		*
@@ -113,7 +138,7 @@ typedef enum electric_state
 typedef struct el_context
 { struct el_context    *next;		/* Next in list */
   int			magic;		/* EL_CTX_MAGIC */
-  int			fd;		/* Input file we are attached to */
+  os_handle		fd;		/* Input file we are attached to */
   IOSTREAM	       *istream;	/* Input stream */
   IOSTREAM	       *ostream;	/* Output stream */
   IOSTREAM	       *estream;	/* Error stream */
@@ -141,7 +166,7 @@ typedef struct el_context
 static el_context *el_clist;
 
 static el_context *
-get_context(int fd)
+get_context(os_handle fd)
 { el_context *c;
 
   for(c=el_clist; c; c=c->next)
@@ -183,7 +208,7 @@ get_context_from_ohandle(void *handle)
 }
 
 static el_context *
-alloc_context(int fd)
+alloc_context(os_handle fd)
 { el_context *c = PL_malloc(sizeof(*c));
 
   memset(c, 0, sizeof(*c));
@@ -385,6 +410,7 @@ el_siggets(EditLine *el, int *count)
 #else /* O_SIGNALS */
 
 #define el_siggets(el, count) el_gets(el, count)
+#define SIGWINCH 1
 
 #endif /* O_SIGNALS */
 
@@ -413,9 +439,67 @@ electric_init(EditLine *el)
 		 *	  LOW-LEVEL READ	*
 		 *******************************/
 
-static int
-wait_on_fd(int fd, int timeout)			/* milliseconds */
+#ifdef __WINDOWS__
+#define MAX_PEEK 64
+
+static bool
+has_interesting_event(HANDLE hIn)
+{ INPUT_RECORD buffer[MAX_PEEK];
+  DWORD done;
+  BOOL rc = PeekConsoleInput(hIn, buffer, MAX_PEEK, &done);
+  if ( rc )
+  { for(DWORD i=0; i<done; i++)
+    { INPUT_RECORD *ev = &buffer[i];
+      switch(ev->EventType)
+      { case KEY_EVENT:
+	  if ( ev->Event.KeyEvent.bKeyDown )
+	    return true;
+	  break;
+	case WINDOW_BUFFER_SIZE_EVENT:
+	  return true;
+	default:
+      }
+    }
+    return false;
+  }
+
+  return true;			/* error, so wakeup */
+}
+
+static bool
+win_wait_for_key_down(HANDLE hIn, int timeout)
+{ ULONGLONG start = GetTickCount64();
+  for(;;)
+  { int wait = timeout - (GetTickCount64()-start);
+    if ( wait > 0 )
+    { DWORD rc = WaitForSingleObject(hIn, wait);
+      if ( rc == WAIT_OBJECT_0 )
+      { if ( has_interesting_event(hIn) )
+	{ return true;
+	} else
+	{ FlushConsoleInputBuffer(hIn);
+	  continue;
+	}
+      }
+    }
+    return false;
+  }
+}
+#endif/*__WINDOWS__*/
+
+
+static bool				  /* true if there is input */
+wait_for_input(EditLine *el, int timeout) /* milliseconds */
 {
+#ifdef __WINDOWS__
+  HANDLE hIn;
+  el_get(el, EL_GETHANDLE, 0, &hIn);
+  return win_wait_for_key_down(hIn, timeout);
+#else/*__WINDOWS__*/
+  FILE *in;
+  el_get(el, EL_GETFP, 0, &in);
+  int fd = fileno(in);
+
 #ifdef HAVE_POLL
   struct pollfd fds[1];
 
@@ -441,6 +525,7 @@ wait_on_fd(int fd, int timeout)			/* milliseconds */
 
   return select(fd+1, &rfds, NULL, NULL, &tv) != 0;
 #endif
+#endif /*__WINDOWS__*/
 }
 
 
@@ -483,6 +568,7 @@ EL_BUILTIN_GETCFN, which is simple defined as NULL.
  * SUCH DAMAGE.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
+#ifndef __WINDOWS__
 static int
 read__fixio(int fd, int e)
 { (void)fd;
@@ -549,15 +635,25 @@ do_read(el_context *ctx, int fd, char *buf, size_t size)
 
   return rc;
 }
+#endif/*__WINDOWS__*/
 
 
 static void
 refresh(el_context *ctx)
-{ FILE *err;
+{
+#if __WINDOWS__
+  HANDLE hErr;
+  el_get(ctx->el, EL_GETHANDLE, 2, &hErr);
+  el_resize(ctx->el);
+  const wchar_t *nl = L"\n";
+  WriteConsoleW(hErr, nl, wcslen(nl), NULL, NULL);
+#else
+  FILE *err;
 
   el_get(ctx->el, EL_GETFP, 2, &err);
   el_resize(ctx->el);
   fprintf(err, "\r");
+#endif
   el_set(ctx->el, EL_REFRESH);
 }
 
@@ -568,19 +664,9 @@ refresh(el_context *ctx)
 #define el_char_t unsigned char
 #endif
 
-static int
-read_char(EditLine *el, el_char_t *cp)
-{ ssize_t num_read;
-  int tried = 0;
-  char cbuf[MB_LEN_MAX];
-  size_t cbp = 0;
-  int save_errno = errno;
-  el_context *ctx;
-  FILE *in;
-
-  el_get(el, EL_CLIENTDATA, (void**)&ctx);	/* What to do if we have no context? */
-  el_get(el, EL_GETFP, 0, &in);
-
+static ssize_t
+electric_cursor_read_char(el_context *ctx, el_char_t *cp)
+{
 #ifndef HAVE_EL_CURSOR
   if ( ctx->move_cursor )
   { if ( ctx->move_cursor > 0 )
@@ -598,7 +684,7 @@ read_char(EditLine *el, el_char_t *cp)
   { switch(ctx->electric.state)
     { case E_WAIT:				/* "^[" */
 	ctx->electric.state = E_COMMAND;
-	wait_on_fd(fileno(in), ctx->electric.timeout);
+	wait_for_input(ctx->el, ctx->electric.timeout);
 	*cp = (el_char_t)27;			/* ESC */
 	return 1;
       case E_COMMAND:
@@ -609,6 +695,17 @@ read_char(EditLine *el, el_char_t *cp)
 	break;
     }
   }
+  return 0;
+}
+
+static int
+read_char(EditLine *el, el_char_t *cp)
+{ el_context *ctx;
+  ssize_t num_read;
+
+  el_get(el, EL_CLIENTDATA, (void**)&ctx);	/* What to do if we have no context? */
+  if ( (num_read=electric_cursor_read_char(ctx, cp)) > 0 )
+    return num_read;
 
  again:
   ctx->sig_no = 0;
@@ -617,7 +714,49 @@ read_char(EditLine *el, el_char_t *cp)
     *cp = (el_char_t)'\0';
     return -1;
   }
+  if ( ctx->sig_no == SIGWINCH )
+    refresh(ctx);
 
+#ifdef __WINDOWS__
+  HANDLE hIn;
+
+  el_get(el, EL_GETHANDLE, 0, &hIn);
+  INPUT_RECORD ev;
+  DWORD done;
+
+  BOOL rc = ReadConsoleInput(hIn, &ev, 1, &done);
+  if ( rc )
+  { if ( done == 1 )
+    { switch(ev.EventType)
+      { case KEY_EVENT:
+	{ if ( ev.Event.KeyEvent.bKeyDown )
+	  { *cp = ev.Event.KeyEvent.uChar.UnicodeChar;
+	    return 1;
+	  }
+	  break;
+	}
+	case WINDOW_BUFFER_SIZE_EVENT:
+	{ //int cols = ev.Event.WindowBufferSizeEvent.dwSize.X;
+	  //int rows = ev.Event.WindowBufferSizeEvent.dwSize.Y;
+	  refresh(ctx);
+	  break;
+	}
+	case MOUSE_EVENT:
+	default:
+      }
+    }
+    goto again;
+  } else
+  { return -1;		/* set errno? */
+  }
+#else/*__WINDOWS__*/
+  int tried = 0;
+  char cbuf[MB_LEN_MAX];
+  size_t cbp = 0;
+  int save_errno = errno;
+
+  FILE *in;
+  el_get(el, EL_GETFP, 0, &in);
   while ( (num_read = do_read(ctx, fileno(in), cbuf + cbp, (size_t)1)) == -1 )
   { int e = errno;
 
@@ -699,10 +838,11 @@ read_char(EditLine *el, el_char_t *cp)
 	 return 1;
     }
   }
-#else
+#else/*HAVE_EL_WSET*/
   *cp = cbuf[0]&0xff;
   return 1;
-#endif
+#endif/*HAVE_EL_WSET*/
+#endif/*__WINDOWS__*/
 }
 
 
@@ -727,7 +867,7 @@ utf8_chars(const char *in, size_t len)
 }
 
 
-static size_t
+static ssize_t
 send_one_buffer(el_context *ctx, const char *line, char *buf, size_t size)
 { size_t linelen = strlen(line);
 
@@ -763,10 +903,26 @@ Sread_libedit(void *handle, char *buf, size_t size)
   switch( ttymode )
   { case PL_RAWTTY:			/* get_single_char/1 */
     case PL_NOTTY:			/* -tty */
-    { int fd = Sfileno(ctx->istream);
-      PL_write_prompt(ttymode == PL_NOTTY);
+    { PL_write_prompt(ttymode == PL_NOTTY);
       PL_dispatch(ctx->istream, PL_DISPATCH_WAIT);
+#ifdef __WINDOWS__
+      if ( ttymode == PL_RAWTTY )
+      { return read_char(ctx->el, (el_char_t*)buf);
+      } else
+      { HANDLE hIn;
+	DWORD done;
+	el_get(ctx->el, EL_GETHANDLE, 0, &hIn);
+	BOOL rc = ReadConsoleW(hIn,
+			       buf,
+			       size/sizeof(wchar_t),
+			       &done,
+			       NULL);
+	rval = rc ? done*sizeof(wchar_t) : -1;
+      }
+#else
+      int fd = Sfileno(ctx->istream);
       rval = read(fd, buf, size);
+#endif
       if ( rval > 0 && buf[rval-1] == '\n' )
 	PL_prompt_next(ctx->istream);
       return rval;
@@ -832,13 +988,16 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr)
   if ( PL_get_stream(tin,  &in,  SIO_INPUT) &&
        PL_get_stream(tout, &out, SIO_OUTPUT) &&
        PL_get_stream(terr, &err, SIO_OUTPUT) )
-  { int fd_in, fd_out, fd_err;
+  { os_handle fd_in, fd_out, fd_err;
 
-    if ( (fd_in  = Sfileno(in))  >= 0 && isatty(fd_in) &&
-	 (fd_out = Sfileno(out)) >= 0 &&
-	 (fd_err = Sfileno(err)) >= 0 )
+    if ( (fd_in  = Soshandle(in))  >= 0 && isatty(fd_in) &&
+	 (fd_out = Soshandle(out)) >= 0 &&
+	 (fd_err = Soshandle(err)) >= 0 )
     { if ( !get_context(fd_in) )
       { el_context *ctx = alloc_context(fd_in);
+#ifdef __WINDOWS__
+	in->encoding = ENC_UTF8;
+#else
 	FILE *fin, *fout, *ferr;
 	int fd_in2  = dup(fd_in);
 	int fd_out2 = dup(fd_out);
@@ -851,6 +1010,7 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr)
 	setlinebuf(fin);
 	setlinebuf(fout);
 	setbuf(ferr, NULL);
+#endif
 
 	ctx->istream = in;
 	ctx->ostream = out;
@@ -860,7 +1020,11 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr)
 	history(ctx->history, &ctx->ev, H_SETSIZE,   100);
 	history(ctx->history, &ctx->ev, H_SETUNIQUE, TRUE);
 
+#ifdef __WINDOWS__
+	ctx->el = el_init_handles(prog, fd_in, fd_out, fd_err);
+#else
 	ctx->el = el_init(prog, fin, fout, ferr);
+#endif
 
 #ifdef HAVE_EL_WSET
 	el_wset(ctx->el, EL_GETCFN,     read_char);
@@ -910,17 +1074,17 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr)
 static foreign_t
 pl_is_wrapped(term_t tin)
 { IOSTREAM *in;
-  int rc;
+  bool rc;
 
   if ( (rc=PL_get_stream(tin, &in, SIO_INPUT)) )
-  { int fd;
+  { os_handle fd;
     el_context *ctx;
 
-    if ( (fd=Sfileno(in)) >= 0 &&
+    if ( (fd=Soshandle(in)) >= 0 &&
 	 (ctx=get_context(fd)) )
-      rc = TRUE;
+      rc = true;
     else
-      rc = FALSE;
+      rc = false;
 
     PL_release_stream_noerror(in);
   }
@@ -936,11 +1100,15 @@ pl_is_wrapped(term_t tin)
 static bool
 get_el_context(term_t tin, el_context **ctxp)
 { IOSTREAM *in;
-  int fd = -1;
+  os_handle fd = OSNOHANDLE;
 
+#ifdef __WINDOWS__
+  if ( !PL_get_pointer(tin, (void**)&fd) )
+#else
   if ( !PL_get_integer(tin, &fd) )
+#endif
   { if ( PL_get_stream(tin, &in, SIO_INPUT|SIO_TRYLOCK) )
-    { fd = Sfileno(in);
+    { fd = Soshandle(in);
       PL_release_stream_noerror(in);
     } else
     { return false;
@@ -995,11 +1163,13 @@ pl_unwrap(term_t tin)
     ctx->estream->functions = ctx->orig_functions;
 
     history_end(ctx->history);
+#ifndef __WINDOWS__
     for(int i=0; i<=2; i++)
     { FILE *fd;
       if ( el_get(ctx->el, EL_GETFP, i, &fd) == 0 )
 	fclose(fd);
     }
+#endif
 
     el_end(ctx->el);
 

@@ -8,7 +8,11 @@ if(LIBEDIT_FOUND)
 set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} ${LIBEDIT_LIBRARIES})
 
 AC_CHECK_HEADERS(fcntl.h poll.h sys/ioctl.h sys/select.h unistd.h)
-AC_CHECK_FUNCS(el_cursor el_wset poll)
+AC_CHECK_FUNCS(el_cursor el_wset poll el_init_handles)
+
+if(WIN32)
+  set(O_SIGNALS)
+endif()
 
 configure_file(config.h.cmake config.h)
 

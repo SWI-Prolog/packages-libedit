@@ -198,7 +198,7 @@ alloc_context(int fd)
 
 static void
 update_prompt(el_context *ctx)
-{ char *np = PL_prompt_string(ctx->fd);
+{ char *np = PL_prompt_string(ctx->istream);
 
   if ( ctx->prompt && np && strcmp(np, ctx->prompt) == 0 )
     return;
@@ -768,7 +768,7 @@ Sread_libedit(void *handle, char *buf, size_t size)
       PL_dispatch(ctx->istream, PL_DISPATCH_WAIT);
       rval = read(fd, buf, size);
       if ( rval > 0 && buf[rval-1] == '\n' )
-	PL_prompt_next(fd);
+	PL_prompt_next(ctx->istream);
       return rval;
     }
     case PL_COOKEDTTY:

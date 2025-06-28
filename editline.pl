@@ -35,12 +35,14 @@
 */
 
 :- module(editline,
-          [ el_wrap/0,				% wrap user_input, etc.
+          [ el_wrap/0,                          % wrap user_input, etc.
+            el_wrap/1,                          % +Options
             el_wrap/4,                          % +Prog, +Input, +Output, +Error
+            el_wrap/5,                          % +Prog, +Input, +Output, +Error, +Options
             el_wrapped/1,                       % +Input
-            el_unwrap/1,			% +Input
+            el_unwrap/1,                        % +Input
 
-            el_source/2,			% +Input, +File
+            el_source/2,                        % +Input, +File
             el_bind/2,                          % +Input, +Args
             el_addfn/4,                         % +Input, +Name, +Help, :Goal
             el_cursor/2,                        % +Input, +Move
@@ -87,6 +89,7 @@ el_wrap_if_ok :-
 el_wrap_if_ok.
 
 %!  el_wrap is det.
+%!  el_wrap(+Options) is det.
 %
 %   Enable using editline on the standard   user streams if `user_input`
 %   is connected to a terminal. This is   the  high level predicate used
@@ -98,14 +101,17 @@ el_wrap_if_ok.
 %   el_wrap/4).
 
 el_wrap :-
+    el_wrap([]).
+
+el_wrap(_) :-
     el_wrapped(user_input),
     !.
-el_wrap :-
+el_wrap(Options) :-
     stream_property(user_input, tty(true)), !,
-    el_wrap(swipl, user_input, user_output, user_error),
+    el_wrap(swipl, user_input, user_output, user_error, Options),
     add_prolog_commands(user_input),
     forall(el_setup(user_input), true).
-el_wrap.
+el_wrap(_).
 
 add_prolog_commands(Input) :-
     el_addfn(Input, complete, 'Complete atoms and files', complete),
@@ -121,12 +127,20 @@ add_prolog_commands(Input) :-
     el_source(Input, _).
 
 %!  el_wrap(+ProgName:atom, +In:stream, +Out:stream, +Error:stream) is det.
+%!  el_wrap(+ProgName:atom, +In:stream, +Out:stream, +Error:stream, +Options) is det.
 %
 %   Enable editline on  the  stream-triple   <In,Out,Error>.  From  this
-%   moment on In is a handle to the command line editor.
+%   moment on In is a handle to the command line editor.  Options:
+%
+%     - pipes(true)
+%       Windows only. Assume the I/O is using pipes rather than a
+%       console.  This is used for the Epilog terminal.
 %
 %   @arg ProgName is the name of the invoking program, used when reading
 %   the editrc(5) file to determine which settings to use.
+
+el_wrap(ProgName, In, Out, Error) :-
+    el_wrap(ProgName, In, Out, Error, []).
 
 %!  el_setup(+In:stream) is nondet.
 %

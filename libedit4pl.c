@@ -64,6 +64,10 @@
 #include <sys/ioctl.h>
 #endif
 
+#ifndef EPILOG
+#define EPILOG 0x400		/* Windows: Epilog using pipes */
+#endif
+
 static atom_t ATOM_norm;
 static atom_t ATOM_newline;
 static atom_t ATOM_eof;
@@ -153,6 +157,7 @@ typedef struct el_context
   command	       *commands;	/* User commands */
   binding	       *bindings;	/* Bindings to user commands */
   int			reader;		/* Current reader thread */
+  unsigned int		flags;		/* Misc flags */
   struct
   { int timeout;			/* Time to wait */
     int move;				/* Amount to move */
@@ -698,6 +703,85 @@ electric_cursor_read_char(el_context *ctx, el_char_t *cp)
   return 0;
 }
 
+/* from SWI-Prolog src/os/pl-utf8.h */
+#define ISUTF8_CB(c)  (((c)&0xc0) == 0x80) /* Is continuation byte */
+#define ISUTF8_FB2(c) (((c)&0xe0) == 0xc0)
+#define ISUTF8_FB3(c) (((c)&0xf0) == 0xe0)
+#define ISUTF8_FB4(c) (((c)&0xf8) == 0xf0)
+#define ISUTF8_FB5(c) (((c)&0xfc) == 0xf8)
+#define ISUTF8_FB6(c) (((c)&0xfe) == 0xfc)
+
+#define UTF8_FBN(c) (!(c&0x80)     ? 0 : \
+		     ISUTF8_FB2(c) ? 1 : \
+		     ISUTF8_FB3(c) ? 2 : \
+		     ISUTF8_FB4(c) ? 3 : \
+		     ISUTF8_FB5(c) ? 4 : \
+		     ISUTF8_FB6(c) ? 5 : -1)
+
+static int
+utf8_code_point(const char **i, const char *e, int *cp)
+{ unsigned char c = (unsigned char)**i;
+  int code;
+  int n;
+
+  ++(*i);
+  *cp = c;
+  if ( c < 0x80 )
+    return 1;
+  if ( c < 0xc0 )
+    return -1;
+
+  if ( c < 0xe0)
+  { code = c & 0x1f;
+    n = 1;
+  } else if ( c < 0xf0 )
+  { code = c & 0x0f;
+    n = 2;
+  } else if ( c < 0xf8 )
+  { code = c & 0x07;
+    n = 3;
+  } else if ( c < 0xfc )
+  { code = c & 0x03;
+    n = 4;
+  } else if (c < 0xfe)
+  { code = c & 0x01;
+    n = 5;
+  } else
+  { return -1;
+  }
+
+  for (int k = 0; k < n; ++k)
+  { if ( *i + k == e )
+      return -1;
+
+    c = (*i)[k];
+    if ( c < 0x80 || c >= 0xc0 )
+      return -1;
+
+    code = (code << 6) | (c & 0x3f);
+  }
+
+  *i += n;
+  *cp = code;
+
+  return n + 1;
+}
+
+
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+Deprecated old API for decoding UTF-8 strings.
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+char *
+utf8_get_char(const char *in, int *chr)
+{ const char *i = in;
+
+  utf8_code_point(&i, NULL, chr);
+
+  return (char*)i;
+}
+
+
 static int
 read_char(EditLine *el, el_char_t *cp)
 { el_context *ctx;
@@ -708,46 +792,82 @@ read_char(EditLine *el, el_char_t *cp)
     return num_read;
 
  again:
-  ctx->sig_no = 0;
-  if ( !PL_dispatch(ctx->istream, PL_DISPATCH_WAIT) )
-  { Sset_exception(ctx->istream, PL_exception(0));
-    *cp = (el_char_t)'\0';
-    return -1;
+  if ( !(ctx->flags&EPILOG) )	/* Epilog event dispatching is from the console thread */
+  { ctx->sig_no = 0;
+    if ( !PL_dispatch(ctx->istream, PL_DISPATCH_WAIT) )
+    { Sset_exception(ctx->istream, PL_exception(0));
+      *cp = (el_char_t)'\0';
+      return -1;
+    }
+    if ( ctx->sig_no == SIGWINCH )
+      refresh(ctx);
   }
-  if ( ctx->sig_no == SIGWINCH )
-    refresh(ctx);
 
 #ifdef __WINDOWS__
   HANDLE hIn;
 
   el_get(el, EL_GETHANDLE, 0, &hIn);
-  INPUT_RECORD ev;
-  DWORD done;
+  if ( ctx->flags & EPILOG )	/* hIn is a Windows pipe */
+  { char buffer[10];
+    int start = 0;
+    DWORD bytes;
 
-  BOOL rc = ReadConsoleInput(hIn, &ev, 1, &done);
-  if ( rc )
-  { if ( done == 1 )
-    { switch(ev.EventType)
-      { case KEY_EVENT:
-	{ if ( ev.Event.KeyEvent.bKeyDown )
-	  { *cp = ev.Event.KeyEvent.uChar.UnicodeChar;
-	    return 1;
-	  }
-	  break;
-	}
-	case WINDOW_BUFFER_SIZE_EVENT:
-	{ //int cols = ev.Event.WindowBufferSizeEvent.dwSize.X;
-	  //int rows = ev.Event.WindowBufferSizeEvent.dwSize.Y;
-	  refresh(ctx);
-	  break;
-	}
-	case MOUSE_EVENT:
-	default:
+    BOOL rc = ReadFile(hIn, &buffer[start], 1, &bytes, NULL);
+    if ( rc )
+    { if ( bytes == 0 )
+      { *cp = 0;		/* end of file */
+	return 0;
       }
+      DWORD more = UTF8_FBN(buffer[0]);
+      if ( more == 0 )
+      { *cp = buffer[0]&0xff;
+	return 1;
+      } else
+      { start++;
+	while(more>0)
+	{ BOOL rc = ReadFile(hIn, &buffer[start], more, &bytes, NULL);
+	  if ( !rc )
+	    return -1;
+	  more -= bytes;
+	  start += bytes;
+	}
+	int chr;
+	utf8_get_char(buffer, &chr);
+	*cp = chr;
+	return 1;
+      }
+    } else
+    { return -1;		/* read error */
     }
-    goto again;
   } else
-  { return -1;		/* set errno? */
+  { INPUT_RECORD ev;
+    DWORD done;
+
+    BOOL rc = ReadConsoleInput(hIn, &ev, 1, &done);
+    if ( rc )
+    { if ( done == 1 )
+      { switch(ev.EventType)
+	{ case KEY_EVENT:
+	  { if ( ev.Event.KeyEvent.bKeyDown )
+	    { *cp = ev.Event.KeyEvent.uChar.UnicodeChar;
+	      return 1;
+	    }
+	    break;
+	  }
+	  case WINDOW_BUFFER_SIZE_EVENT:
+	  { //int cols = ev.Event.WindowBufferSizeEvent.dwSize.X;
+	    //int rows = ev.Event.WindowBufferSizeEvent.dwSize.Y;
+	    refresh(ctx);
+	    break;
+	  }
+	  case MOUSE_EVENT:
+	  default:
+	}
+      }
+      goto again;
+    } else
+    { return -1;		/* set errno? */
+    }
   }
 #else/*__WINDOWS__*/
   int tried = 0;
@@ -976,21 +1096,33 @@ prompt(EditLine *el)
 }
 
 
+static PL_option_t el_wrap_options[] =
+{ PL_OPTION("pipes",   OPT_BOOL),
+  PL_OPTIONS_END
+};
+
 static foreign_t
-pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr)
+pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr, term_t options)
 { IOSTREAM *in = NULL, *out = NULL, *err = NULL;
   int rc = FALSE;
   char *prog;
+  unsigned int el_flags = 0;
+  int pipes = false;
 
   if ( !PL_get_chars(progid, &prog, STR_OPTIONS) )
     return FALSE;
+  if ( !PL_scan_options(options, 0, "el_wrap_options",
+			el_wrap_options, &pipes) )
+    return FALSE;
+  if ( pipes )
+    el_flags |= EPILOG;
 
   if ( PL_get_stream(tin,  &in,  SIO_INPUT) &&
        PL_get_stream(tout, &out, SIO_OUTPUT) &&
        PL_get_stream(terr, &err, SIO_OUTPUT) )
   { os_handle fd_in, fd_out, fd_err;
 
-    if ( (fd_in  = Soshandle(in))  >= 0 && isatty(fd_in) &&
+    if ( (fd_in  = Soshandle(in))  >= 0 && (pipes || isatty(fd_in)) &&
 	 (fd_out = Soshandle(out)) >= 0 &&
 	 (fd_err = Soshandle(err)) >= 0 )
     { if ( !get_context(fd_in) )
@@ -1011,7 +1143,7 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr)
 	setlinebuf(fout);
 	setbuf(ferr, NULL);
 #endif
-
+	ctx->flags   = el_flags;
 	ctx->istream = in;
 	ctx->ostream = out;
 	ctx->estream = err;
@@ -1021,7 +1153,7 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr)
 	history(ctx->history, &ctx->ev, H_SETUNIQUE, TRUE);
 
 #ifdef __WINDOWS__
-	ctx->el = el_init_handles(prog, fd_in, fd_out, fd_err);
+	ctx->el = el_init_handles(prog, fd_in, fd_out, fd_err, el_flags);
 #else
 	ctx->el = el_init(prog, fin, fout, ferr);
 #endif
@@ -1788,7 +1920,7 @@ install_libedit4pl(void)
   MKFUNCTOR(electric, 3);
   FUNCTOR_pair2 = PL_new_functor(PL_new_atom("-"), 2);
 
-  PL_register_foreign("el_wrap",	  4, pl_wrap,	       0);
+  PL_register_foreign("el_wrap",	  5, pl_wrap,	       0);
   PL_register_foreign("el_wrapped",	  1, pl_is_wrapped,    0);
   PL_register_foreign("el_unwrap",	  1, pl_unwrap,	       0);
   PL_register_foreign("el_source",	  2, pl_source,	       0);

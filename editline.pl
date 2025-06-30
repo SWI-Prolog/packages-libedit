@@ -767,11 +767,9 @@ with_quote_flags(Double, Back, Goal) :-
           set_prolog_flag(back_quotes, OBack) )).
 
 clipboard_content(Text) :-
-    (   current_predicate(get/3)
-    ->  true
-    ;   current_prolog_flag(gui, true),
-        use_module(library(pce), [get/3, in_pce_thread_sync/1])
-    ),
+    current_prolog_flag(gui, true),
     !,
-    in_pce_thread_sync(get(@(display), paste, primary, string(Text))).
+    autoload_call(in_pce_thread_sync(
+                      autoload_call(
+                          get(@(display), paste, primary, string(Text))))).
 clipboard_content("").

@@ -786,6 +786,12 @@ static int
 read_char(EditLine *el, el_char_t *cp)
 { el_context *ctx;
   ssize_t num_read;
+#ifndef __WINDOWS__
+  bool tried = false;
+  char cbuf[MB_LEN_MAX];
+  size_t cbp = 0;
+  int save_errno = errno;
+#endif
 
   el_get(el, EL_CLIENTDATA, (void**)&ctx);	/* What to do if we have no context? */
   if ( (num_read=electric_cursor_read_char(ctx, cp)) > 0 )
@@ -870,11 +876,6 @@ read_char(EditLine *el, el_char_t *cp)
     }
   }
 #else/*__WINDOWS__*/
-  int tried = 0;
-  char cbuf[MB_LEN_MAX];
-  size_t cbp = 0;
-  int save_errno = errno;
-
   FILE *in;
   el_get(el, EL_GETFP, 0, &in);
   while ( (num_read = do_read(ctx, fileno(in), cbuf + cbp, (size_t)1)) == -1 )
@@ -900,7 +901,7 @@ read_char(EditLine *el, el_char_t *cp)
 
     if ( !tried && read__fixio(fileno(in), e) == 0 )
     { errno = save_errno;
-      tried = 1;
+      tried = true;
     } else
     { errno = e;
       *cp = (el_char_t)'\0';

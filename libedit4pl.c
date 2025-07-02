@@ -1233,24 +1233,26 @@ pl_is_wrapped(term_t tin)
 static bool
 get_el_context(term_t tin, el_context **ctxp)
 { IOSTREAM *in;
-  os_handle fd = OSNOHANDLE;
+  os_handle ctx_handle = OSNOHANDLE;
+  int fno;
 
+  if ( PL_get_integer(tin, &fno) )
+  {
 #ifdef __WINDOWS__
-  if ( !PL_get_pointer(tin, (void**)&fd) )
+    ctx_handle = (HANDLE)_get_osfhandle(fno);
 #else
-  if ( !PL_get_integer(tin, &fd) )
+    ctx_handle = fno;
 #endif
-  { if ( PL_get_stream(tin, &in, SIO_INPUT|SIO_TRYLOCK) )
-    { fd = Soshandle(in);
-      PL_release_stream_noerror(in);
-    } else
-    { return false;
-    }
+  } else if ( PL_get_stream(tin, &in, SIO_INPUT|SIO_TRYLOCK) )
+  { ctx_handle = Soshandle(in);
+    PL_release_stream_noerror(in);
+  } else
+  { return false;
   }
 
-  if ( fd >= 0 )
+  if ( ctx_handle != OSNOHANDLE )
   { el_context *ctx;
-    if ( (ctx=get_context(fd)) )
+    if ( (ctx=get_context(ctx_handle)) )
     { *ctxp = ctx;
       return true;
     }

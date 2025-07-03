@@ -966,6 +966,26 @@ read_char(EditLine *el, el_char_t *cp)
 #endif/*__WINDOWS__*/
 }
 
+#ifdef __WINDOWS__
+static int
+terminal_get_size(EditLine *el, int *cols, int *rows)
+{ el_context *ctx;
+
+  el_get(el, EL_CLIENTDATA, (void**)&ctx);
+  if ( (ctx->flags&EPILOG) )
+  { short scols, srows;
+    if ( Sgetttysize(ctx->ostream, &scols, &srows) == 0 &&
+	 scols > 0 && srows > 0 )
+    { *cols = scols;
+      *rows = srows;
+      return 0;
+    }
+  }
+  return -1;
+}
+#endif /*__WINDOWS__*/
+
+
 
 		 /*******************************
 		 *	    IO FUNCTIONS	*
@@ -1155,6 +1175,7 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr, term_t options)
 
 #ifdef __WINDOWS__
 	ctx->el = el_init_handles(prog, fd_in, fd_out, fd_err, el_flags);
+	el_wset(ctx->el, EL_GETSZFN,    terminal_get_size);
 #else
 	ctx->el = el_init(prog, fin, fout, ferr);
 #endif

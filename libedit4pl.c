@@ -1279,7 +1279,7 @@ get_el_context(term_t tin, el_context **ctxp)
     }
   }
 
-  return PL_domain_error("libedit_input", tin);
+  return PL_domain_error("libedit_input", tin),false;
 }
 
 

@@ -179,7 +179,7 @@ el_wrap(ProgName, In, Out, Error) :-
 %   The predicate el_bind/2 is typically used   to bind commands defined
 %   using el_addfn/4. Note that the C proxy   function has only the last
 %   character of the command as context to find the Prolog binding. This
-%   implies we cannot both  bind  e.g.,  "^[?"  *and  "?"  to  a  Prolog
+%   implies we cannot both bind  e.g.,  "^[?"   _and_  "?"  to  a Prolog
 %   function.
 %
 %   @see editrc(5) for more information.

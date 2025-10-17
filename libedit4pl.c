@@ -1913,7 +1913,15 @@ pl_history(term_t tin, term_t option)
   return FALSE;
 }
 
-
+static foreign_t
+el_version(term_t version)
+{
+#if defined(LIBEDIT_MAJOR) && defined(LIBEDIT_MINOR)
+  return PL_unify_integer(version, LIBEDIT_MAJOR*10000+LIBEDIT_MINOR*100);
+#else
+  return PL_unify_integer(version, 0);
+#endif
+}
 
 		 /*******************************
 		 *	   REGISTRATION		*
@@ -1962,4 +1970,5 @@ install_libedit4pl(void)
   PL_register_foreign("el_getc",          2, pl_getc,          0);
   PL_register_foreign("el_push",          2, pl_push,          0);
   PL_register_foreign("el_editmode",      2, pl_editmode,      0);
+  PL_register_foreign("el_version",       1, el_version,       0);
 }

@@ -54,7 +54,9 @@
             el_history_events/2,                % +Input, -Events
             el_add_history/2,                   % +Input, +Line
             el_write_history/2,                 % +Input, +FileName
-            el_read_history/2                   % +Input, +FileName
+            el_read_history/2,                  % +Input, +FileName
+
+	    el_version/1			% -Version:integer
           ]).
 :- autoload(library(apply),[maplist/2,maplist/3]).
 :- autoload(library(lists),[reverse/2,max_list/2,append/3,member/2]).
@@ -269,6 +271,12 @@ el_wrap(ProgName, In, Out, Error) :-
 %
 %   @arg File is a file specification for absolute_file_name/3.
 
+%!  el_version(-Version)
+%
+%   True when Version  is ``LIBEDIT_MAJOR*10000 + LIBEDIT_MINOR*100``.
+%   The  version is  generated from  the include  file ``histedit.h``,
+%   which implies that the actual version of the shared library may be
+%   different.
 
 :- multifile
     prolog:history/2.

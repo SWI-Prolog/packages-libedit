@@ -782,6 +782,80 @@ utf8_get_char(const char *in, int *chr)
 }
 
 
+#ifdef __WINDOWS__
+#define PIPE_READ_EOF               0   // End of file
+#define PIPE_READ_ERROR            -1   // Error occurred
+#define PIPE_READ_PROLOG_EXCEPTION -2	// Prolog exception
+
+static ssize_t
+pipe_read_or_msg(HANDLE hPipe, void *buf, size_t len)
+{ OVERLAPPED ov = {0};
+  ov.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+  if (!ov.hEvent)
+    return PIPE_READ_ERROR;
+
+  DWORD bytesRead = 0;
+  BOOL ok = ReadFile(hPipe, buf, (DWORD)len, &bytesRead, &ov);
+
+  if ( !ok )
+  { DWORD err = GetLastError();
+
+    if ( err == ERROR_IO_PENDING )
+    { // Wait for pipe read OR Windows message
+      for (;;)
+      { DWORD res = MsgWaitForMultipleObjectsEx(
+			1, &ov.hEvent, INFINITE, QS_POSTMESSAGE, MWMO_INPUTAVAILABLE);
+
+	if ( res == WAIT_OBJECT_0 )
+	{ // Read completed
+	  if ( GetOverlappedResult(hPipe, &ov, &bytesRead, FALSE) )
+	  { CloseHandle(ov.hEvent);
+	    return (ssize_t)bytesRead;
+	  } else
+	  { DWORD e = GetLastError();
+	    CloseHandle(ov.hEvent);
+	    return (e == ERROR_BROKEN_PIPE) ? PIPE_READ_EOF : PIPE_READ_ERROR;
+	  }
+	} else if (res == WAIT_OBJECT_0 + 1)
+	{ // Message in queue
+	  MSG msg;
+	  while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+	  { if (msg.message == WM_QUIT)
+	    { CloseHandle(ov.hEvent);
+	      return PIPE_READ_EOF;
+	    }
+	    TranslateMessage(&msg);
+	    DispatchMessage(&msg);
+	  }
+	  if ( PL_handle_signals() < 0 )
+	  { CloseHandle(ov.hEvent);
+	    return PIPE_READ_PROLOG_EXCEPTION;
+	  }
+	} else
+	{ CloseHandle(ov.hEvent);
+	  return PIPE_READ_ERROR;
+	}
+      }
+    } else if ( err == ERROR_BROKEN_PIPE )
+    { CloseHandle(ov.hEvent);
+      return PIPE_READ_EOF;
+    } else if ( err == ERROR_INVALID_PARAMETER )
+    { Sdprintf("Input pipe did not enable FILE_FLAG_OVERLAPPED?\n");
+      CloseHandle(ov.hEvent);
+      return PIPE_READ_ERROR;
+    } else
+    { CloseHandle(ov.hEvent);
+      return PIPE_READ_ERROR;
+    }
+  }
+
+  // Immediate completion (no pending I/O)
+  CloseHandle(ov.hEvent);
+  return (ssize_t)bytesRead;
+}
+
+#endif/* __WINDOWS__ */
+
 static int
 read_char(EditLine *el, el_char_t *cp)
 { el_context *ctx;
@@ -816,26 +890,30 @@ read_char(EditLine *el, el_char_t *cp)
   if ( ctx->flags & EPILOG )	/* hIn is a Windows pipe */
   { char buffer[10];
     int start = 0;
-    DWORD bytes;
+    ssize_t bytes;
 
-    BOOL rc = ReadFile(hIn, &buffer[start], 1, &bytes, NULL);
-    if ( rc )
-    { if ( bytes == 0 )
-      { *cp = 0;		/* end of file */
-	return 0;
-      }
-      DWORD more = UTF8_FBN(buffer[0]);
+    bytes = pipe_read_or_msg(hIn, &buffer[start], 1);
+    if ( bytes == 0 )
+    { *cp = 0;		/* end of file */
+      return 0;
+    } else if ( bytes > 0 )
+    { DWORD more = UTF8_FBN(buffer[0]);
       if ( more == 0 )
       { *cp = buffer[0]&0xff;
 	return 1;
       } else
       { start++;
-	while(more>0)
-	{ BOOL rc = ReadFile(hIn, &buffer[start], more, &bytes, NULL);
-	  if ( !rc )
+	while( more > 0 )
+	{ bytes = pipe_read_or_msg(hIn, &buffer[start], more);
+	  if ( bytes > 0 )
+	  { more -= bytes;
+	    start += bytes;
+	  } else
+	  { if ( bytes == PIPE_READ_PROLOG_EXCEPTION )
+	      Sset_exception(ctx->istream, PL_exception(0));
+	    *cp = (el_char_t)'\0';
 	    return -1;
-	  more -= bytes;
-	  start += bytes;
+	  }
 	}
 	int chr;
 	utf8_get_char(buffer, &chr);
@@ -843,7 +921,10 @@ read_char(EditLine *el, el_char_t *cp)
 	return 1;
       }
     } else
-    { return -1;		/* read error */
+    { if ( bytes == PIPE_READ_PROLOG_EXCEPTION )
+	Sset_exception(ctx->istream, PL_exception(0));
+      *cp = (el_char_t)'\0';
+      return -1;		/* read error */
     }
   } else
   { INPUT_RECORD ev;

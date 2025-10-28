@@ -1840,7 +1840,7 @@ pl_add_history(term_t tin, term_t text)
   char *line;
 
 
-  if ( !PL_get_chars(text, &line, CVT_ATOM|CVT_STRING|REP_UTF8|CVT_EXCEPTION) ||
+  if ( !PL_get_chars(text, &line, STR_OPTIONS) ||
        !get_el_context(tin, &ctx) )
     return FALSE;
 
@@ -2004,6 +2004,129 @@ pl_history(term_t tin, term_t option)
   return FALSE;
 }
 
+#ifndef HAVE_OPEN_MEMSTREAM
+#ifdef HAVE_FUNOPEN
+#define HAVE_OPEN_MEMSTREAM 1
+
+typedef struct
+{ char **bufp;      /* pointer to user buffer pointer */
+  size_t *sizep;    /* pointer to user size variable */
+  char *buffer;     /* allocated buffer */
+  size_t length;    /* bytes written */
+  size_t capacity;  /* allocated size */
+} MEMSTREAM;
+
+static int
+ms_write(void *cookie, const char *buf, int len)
+{ MEMSTREAM *m = (MEMSTREAM *)cookie;
+  size_t needed = m->length + len + 1;  /* +1 for NUL */
+
+  if (needed > m->capacity)
+  { size_t newcap = m->capacity ? m->capacity * 2 : 128;
+    while (newcap < needed) newcap *= 2;
+    char *newbuf = realloc(m->buffer, newcap);
+    if (!newbuf)
+      return -1;
+    m->buffer = newbuf;
+    m->capacity = newcap;
+  }
+
+  memcpy(m->buffer + m->length, buf, len);
+  m->length += len;
+  m->buffer[m->length] = '\0';  /* always null-terminate */
+
+  return len;
+}
+
+static fpos_t
+ms_seek(void *cookie, fpos_t offset, int whence)
+{ MEMSTREAM *m = (MEMSTREAM *)cookie;
+  size_t newpos;
+
+  switch (whence)
+  { case SEEK_SET:
+      newpos = (size_t)offset; break;
+    case SEEK_CUR:
+      newpos = m->length + (size_t)offset; break;
+    case SEEK_END:
+      newpos = m->length + (size_t)offset; break;
+    default: return -1;
+  }
+
+  if (newpos > m->length)
+    newpos = m->length;
+
+  return (fpos_t)newpos;
+}
+
+static int
+ms_close(void *cookie)
+{ MEMSTREAM *m = (MEMSTREAM *)cookie;
+  /* update user pointers */
+  if (m->bufp)  *m->bufp = m->buffer;
+  if (m->sizep) *m->sizep = m->length;
+  free(m);
+  return 0;
+}
+
+FILE *
+open_memstream(char **bufp, size_t *sizep)
+{ MEMSTREAM *m = calloc(1, sizeof(MEMSTREAM));
+  if (!m)
+    return NULL;
+
+  m->bufp = bufp;
+  m->sizep = sizep;
+  m->buffer = NULL;
+  m->capacity = 0;
+  m->length = 0;
+
+  FILE *f = NULL;
+  f = funopen(m, NULL, ms_write, ms_seek, ms_close);
+  if (!f)
+  { free(m);
+    return NULL;
+  }
+
+  return f;
+}
+#endif /*HAVE_FUNOPEN*/
+#endif/*HAVE_OPEN_MEMSTREAM*/
+
+#ifdef HAVE_OPEN_MEMSTREAM
+static foreign_t
+el_history_encoded(term_t raw, term_t encoded)
+{ char *rs;
+
+  if ( PL_get_chars(raw, &rs, STR_OPTIONS) )
+  { History *hist = history_init();
+    HistEvent ev;
+    char *es = NULL;
+    size_t len = 0;
+    bool rc = false;
+
+    history(hist, &ev, H_SETSIZE, 1);
+    history(hist, &ev, H_ENTER,   rs);
+    FILE *fd = open_memstream(&es, &len);
+    history(hist, &ev, H_SAVE_FP, fd);
+    fclose(fd);
+    if ( es )
+    { char *s = strchr(es, '\n');		/* Skip magic */
+      if ( s )
+      { s++;
+	len -= s-es;
+	rc = PL_unify_chars(encoded, PL_STRING|REP_MB, len, s);
+      }
+    }
+    free(es);
+    history_end(hist);
+    return rc;
+  } else
+    return false;
+}
+#endif
+
+
 static foreign_t
 el_version(term_t version)
 {
@@ -2044,23 +2167,30 @@ install_libedit4pl(void)
   MKFUNCTOR(electric, 3);
   FUNCTOR_pair2 = PL_new_functor(PL_new_atom("-"), 2);
 
-  PL_register_foreign("el_wrap",	  5, pl_wrap,	       0);
-  PL_register_foreign("el_wrapped",	  1, pl_is_wrapped,    0);
-  PL_register_foreign("el_unwrap",	  1, pl_unwrap,	       0);
-  PL_register_foreign("el_source",	  2, pl_source,	       0);
-  PL_register_foreign("el_addfn",	  4, pl_addfn,	       0);
-  PL_register_foreign("el_bind",	  2, pl_bind,	       0);
-  PL_register_foreign("el_cursor",	  2, pl_cursor,	       0);
-  PL_register_foreign("el_line",	  2, pl_line,	       0);
-  PL_register_foreign("el_insertstr",	  2, pl_insertstr,     0);
-  PL_register_foreign("el_deletestr",	  2, pl_deletestr,     0);
-  PL_register_foreign("el_add_history",	  2, pl_add_history,   0);
-  PL_register_foreign("el_write_history", 2, pl_write_history, 0);
-  PL_register_foreign("el_read_history",  2, pl_read_history,  0);
-  PL_register_foreign("el_history_events",2, pl_history_events,0);
-  PL_register_foreign("el_history",       2, pl_history,       0);
-  PL_register_foreign("el_getc",          2, pl_getc,          0);
-  PL_register_foreign("el_push",          2, pl_push,          0);
-  PL_register_foreign("el_editmode",      2, pl_editmode,      0);
-  PL_register_foreign("el_version",       1, el_version,       0);
+  PL_register_foreign("el_wrap",	     5,	pl_wrap,	    0);
+  PL_register_foreign("el_wrapped",	     1,	pl_is_wrapped,	    0);
+  PL_register_foreign("el_unwrap",	     1,	pl_unwrap,	    0);
+  PL_register_foreign("el_source",	     2,	pl_source,	    0);
+  PL_register_foreign("el_addfn",	     4,	pl_addfn,	    0);
+  PL_register_foreign("el_bind",	     2,	pl_bind,	    0);
+  PL_register_foreign("el_cursor",	     2,	pl_cursor,	    0);
+  PL_register_foreign("el_line",	     2,	pl_line,	    0);
+  PL_register_foreign("el_insertstr",	     2,	pl_insertstr,	    0);
+  PL_register_foreign("el_deletestr",	     2,	pl_deletestr,	    0);
+  PL_register_foreign("el_add_history",	     2,	pl_add_history,	    0);
+  PL_register_foreign("el_write_history",    2,	pl_write_history,   0);
+  PL_register_foreign("el_read_history",     2,	pl_read_history,    0);
+  PL_register_foreign("el_history_events",2, pl_history_events,     0);
+  PL_register_foreign("el_history",	     2,	pl_history,	    0);
+  PL_register_foreign("el_getc",	     2,	pl_getc,	    0);
+  PL_register_foreign("el_push",	     2,	pl_push,	    0);
+  PL_register_foreign("el_editmode",	     2,	pl_editmode,	    0);
+  PL_register_foreign("el_version",	     1,	el_version,	    0);
+#ifdef HAVE_OPEN_MEMSTREAM
+  PL_register_foreign("el_history_encoded",  2,	el_history_encoded, 0);
+#endif
 }
+
+
+
+

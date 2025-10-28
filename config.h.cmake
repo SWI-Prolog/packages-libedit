@@ -7,5 +7,7 @@
 #cmakedefine HAVE_EL_CURSOR
 #cmakedefine HAVE_EL_WSET
 #cmakedefine HAVE_POLL
+#cmakedefine HAVE_OPEN_MEMSTREAM
+#cmakedefine HAVE_FUNOPEN
 
 #cmakedefine O_SIGNALS

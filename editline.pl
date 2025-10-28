@@ -244,6 +244,9 @@ el_wrap(ProgName, In, Out, Error) :-
 %     Clear the history.
 %     * setsize(+Integer)
 %     Set size of history to size elements.
+%     * getsize(-Integer)
+%     Unify Integer with the number of saved events, i.e., __not__
+%     the maximum size of the history.   See also el_history_events/2.
 %     * setunique(+Boolean)
 %     Set flag that adjacent identical event strings should not be
 %     entered into the history.

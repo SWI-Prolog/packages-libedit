@@ -80,6 +80,7 @@ static atom_t ATOM_error;
 static atom_t ATOM_fatal;
 static atom_t ATOM_clear;
 static atom_t ATOM_setsize;
+static atom_t ATOM_getsize;
 static atom_t ATOM_setunique;
 
 static functor_t FUNCTOR_line2;
@@ -1968,6 +1969,15 @@ pl_history(term_t tin, term_t option)
 	if ( arity != 1 ) goto err_domain;
 	if ( !get_int_arg(1, option, &s) ) return FALSE;
 	rc = history(ctx->history, &ev, H_SETSIZE, s);
+      } else if ( arity == 1 && name == ATOM_getsize )
+      { term_t a;
+
+	if ( history(ctx->history, &ev, H_GETSIZE) == 0 )
+	{ return ( (a = PL_new_term_ref()) &&
+		   PL_get_arg(1, option, a) &&
+		   PL_unify_integer(a, ev.num) );
+	}
+	return false;
       } else if ( name == ATOM_clear )
       { if ( arity != 0 ) goto err_domain;
 
@@ -2027,6 +2037,7 @@ install_libedit4pl(void)
   MKATOM(fatal);
   MKATOM(clear);
   MKATOM(setsize);
+  MKATOM(getsize);
   MKATOM(setunique);
 
   MKFUNCTOR(line, 2);

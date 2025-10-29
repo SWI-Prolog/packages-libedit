@@ -2093,7 +2093,8 @@ open_memstream(char **bufp, size_t *sizep)
 #endif /*HAVE_FUNOPEN*/
 #endif/*HAVE_OPEN_MEMSTREAM*/
 
-#ifdef HAVE_OPEN_MEMSTREAM
+#if defined(HAVE_OPEN_MEMSTREAM) && defined(H_SAVE_FP)
+#define HAVE_EL_HISTORY_ENCODED 1
 static foreign_t
 el_history_encoded(term_t raw, term_t encoded)
 { char *rs;
@@ -2186,7 +2187,7 @@ install_libedit4pl(void)
   PL_register_foreign("el_push",	     2,	pl_push,	    0);
   PL_register_foreign("el_editmode",	     2,	pl_editmode,	    0);
   PL_register_foreign("el_version",	     1,	el_version,	    0);
-#ifdef HAVE_OPEN_MEMSTREAM
+#ifdef HAVE_EL_HISTORY_ENCODED
   PL_register_foreign("el_history_encoded",  2,	el_history_encoded, 0);
 #endif
 }

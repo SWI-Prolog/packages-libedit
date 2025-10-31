@@ -287,12 +287,38 @@ el_wrap(ProgName, In, Out, Error) :-
 prolog:history(Input, add(Line)) :-
     el_add_history(Input, Line).
 prolog:history(Input, load(File)) :-
-    el_read_history(Input, File).
+    compat_read_history(Input, File).
 prolog:history(Input, save(File)) :-
     el_write_history(Input, File).
 prolog:history(Input, load) :-
     el_history_events(Input, Events),
     load_history_events(Events).
+
+%!  compat_read_history(+Input, +File) is det.
+%
+%   Read the saved history. This loads both  the LibEdit and old history
+%   format used by `swipl-win.exe` before migrating to SDL.
+
+compat_read_history(Input, File) :-
+    catch(el_read_history(Input, File), error(editline(_),_), fail),
+    !.
+compat_read_history(Input, File) :-
+    access_file(File, read),
+    setup_call_cleanup(
+        open(File, read, In, [encoding(utf8)]),
+        read_old_history(Input, In),
+        close(In)),
+    !.
+compat_read_history(_, _).
+
+read_old_history(Input, From) :-
+    catch('$raw_read'(From, Line), error(_,_), fail),
+    (   Line == end_of_file
+    ->  true
+    ;   string_concat(Line, '.', Event),
+        el_add_history(Input, Event),
+        read_old_history(Input, From)
+    ).
 
 %!  load_history_events(+Events)
 %

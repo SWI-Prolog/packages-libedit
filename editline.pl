@@ -784,3 +784,13 @@ clipboard_content(Text) :-
                       autoload_call(
                           get(@(display), paste, primary, string(Text))))).
 clipboard_content("").
+
+
+                /*******************************
+                *           MESSAGE            *
+                *******************************/
+
+:- multifile prolog:error_message//1.
+
+prolog:error_message(editline(Msg)) -->
+    [ 'editline: ~s'-[Msg] ].

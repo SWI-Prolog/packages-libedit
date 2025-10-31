@@ -83,6 +83,8 @@ static atom_t ATOM_setsize;
 static atom_t ATOM_getsize;
 static atom_t ATOM_setunique;
 
+static functor_t FUNCTOR_error2;
+static functor_t FUNCTOR_editline1;
 static functor_t FUNCTOR_line2;
 static functor_t FUNCTOR_electric3;
 static functor_t FUNCTOR_pair2;
@@ -238,6 +240,18 @@ update_prompt(el_context *ctx)
   ctx->prompt = np ? strdup(np) : NULL;
 }
 
+
+static bool
+el_error(const char *msg)
+{ term_t ex;
+
+  return ( (ex=PL_new_term_ref()) &&
+	   PL_unify_term(ex, PL_FUNCTOR, FUNCTOR_error2,
+			       PL_FUNCTOR, FUNCTOR_editline1,
+				 PL_STRING, msg,
+			       PL_VARIABLE) &&
+	   PL_raise_exception(ex) );
+}
 
 		 /*******************************
 		 *		PORT		*
@@ -1875,11 +1889,12 @@ pl_read_history(term_t tin, term_t file_name)
        PL_get_file_name(file_name, &fname,
 			PL_FILE_OSPATH|PL_FILE_SEARCH|PL_FILE_READ|
 			PL_FILE_NOERRORS) )
-  { history(ctx->history, &ctx->ev, H_LOAD, fname);
-    return TRUE;
+  { if ( history(ctx->history, &ctx->ev, H_LOAD, fname) < 0 )
+      return el_error(ctx->ev.str);
+    return true;
   }
 
-  return FALSE;
+  return false;
 }
 
 
@@ -2164,6 +2179,8 @@ install_libedit4pl(void)
   MKATOM(getsize);
   MKATOM(setunique);
 
+  MKFUNCTOR(error, 2);
+  MKFUNCTOR(editline, 1);
   MKFUNCTOR(line, 2);
   MKFUNCTOR(electric, 3);
   FUNCTOR_pair2 = PL_new_functor(PL_new_atom("-"), 2);
@@ -2191,7 +2208,3 @@ install_libedit4pl(void)
   PL_register_foreign("el_history_encoded",  2,	el_history_encoded, 0);
 #endif
 }
-
-
-
-

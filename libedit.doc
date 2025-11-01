@@ -14,10 +14,9 @@
 
 \title{SWI-Prolog binding to BSD libedit}
 \author{Jan Wielemaker \\
-	VU University Amsterdam \\
-	CWI, Amsterdam \\
+	SWI-Prolog Solutions b.v. \\
 	The Netherlands \\
-	E-mail: \email{J.Wielemaker@vu.nl}}
+	E-mail: \email{jan@swi-prolog.org}}
 
 \maketitle
 

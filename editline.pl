@@ -240,16 +240,33 @@ el_wrap(ProgName, In, Out, Error) :-
 %   Perform a generic action on the history. This provides an incomplete
 %   interface to history() from libedit.  Supported actions are:
 %
-%     * clear
-%     Clear the history.
-%     * setsize(+Integer)
-%     Set size of history to size elements.
-%     * getsize(-Integer)
-%     Unify Integer with the number of saved events, i.e., __not__
-%     the maximum size of the history.   See also el_history_events/2.
-%     * setunique(+Boolean)
-%     Set flag that adjacent identical event strings should not be
-%     entered into the history.
+%     - clear
+%       Clear the history.
+%     - setsize(+Integer)
+%       Set size of history to size elements.
+%     - getsize(-Integer)
+%       Unify Integer with the number of saved events, i.e., __not__
+%       the maximum size of the history.   See also el_history_events/2.
+%     - setunique(+Boolean)
+%       Set flag that adjacent identical event strings should not be
+%       entered into the history.
+%     - first(-Num, -String)
+%     - last(-Num, -String)
+%     - curr(-Num, -String)
+%     - prev(-Num, -String)
+%     - next(-Num, -String)
+%       Retrieve an event.  Num is the event number and String is the
+%       event string.
+%     - set(Num)
+%       Set the notion of _current_ to Num.
+%     - prev_str(+Search, -Num, -String)
+%     - next_str(+Search, -Num, -String)
+%       Retrieve the previous or next event whose String starts with
+%       Search.
+%     - event(+Num, -String)
+%       True when String represents event Num.   This is an extension to
+%       the history() API, retrieving a numbered event without changing
+%       the current notion.
 
 %!  el_history_events(+In:stream, -Events:list(pair)) is det.
 %

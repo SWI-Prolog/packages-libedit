@@ -82,6 +82,10 @@ static atom_t ATOM_clear;
 static atom_t ATOM_setsize;
 static atom_t ATOM_getsize;
 static atom_t ATOM_setunique;
+static atom_t ATOM_set;
+static atom_t ATOM_prev_str;
+static atom_t ATOM_next_str;
+static atom_t ATOM_event;
 
 static functor_t FUNCTOR_error2;
 static functor_t FUNCTOR_editline1;
@@ -89,7 +93,13 @@ static functor_t FUNCTOR_line2;
 static functor_t FUNCTOR_electric3;
 static functor_t FUNCTOR_pair2;
 
-#define STR_OPTIONS (CVT_ATOM|CVT_STRING|CVT_LIST|REP_MB|CVT_EXCEPTION)
+#ifdef __WINDOWS__
+#define REP_EL REP_UTF8
+#else
+#define REP_EL REP_MB
+#endif
+
+#define STR_OPTIONS (CVT_ATOM|CVT_STRING|CVT_LIST|REP_EL|CVT_EXCEPTION)
 
 		 /*******************************
 		 *           WIN/UNIX           *
@@ -1941,31 +1951,80 @@ pl_history_events(term_t tin, term_t events)
 }
 
 
-static int
+static bool
 get_int_arg(int i, term_t t, int *v)
 { term_t a;
 
-  if ( (a=PL_new_term_ref()) &&
-       PL_get_arg(i, t, a) &&
-       PL_get_integer_ex(a, v) )
-    return TRUE;
-
-  return FALSE;
+  return ( (a=PL_new_term_ref()) &&
+	   PL_get_arg(i, t, a) &&
+	   PL_get_integer_ex(a, v) );
 }
 
-static int
+static bool
 get_bool_arg(int i, term_t t, int *v)
 { term_t a;
 
-  if ( (a=PL_new_term_ref()) &&
-       PL_get_arg(i, t, a) &&
-       PL_get_bool_ex(a, v) )
-    return TRUE;
+  return ( (a=PL_new_term_ref()) &&
+	   PL_get_arg(i, t, a) &&
+	   PL_get_bool_ex(a, v) );
+}
 
-  return FALSE;
+static bool
+get_str_arg(int i, term_t t, char **s)
+{ term_t a;
+
+  return ( (a=PL_new_term_ref()) &&
+	   PL_get_arg(i, t, a) &&
+	   PL_get_chars(a, s, STR_OPTIONS) );
+}
+
+static bool
+unify_int_arg(int i, term_t t, int v)
+{ term_t a;
+
+  return ( (a=PL_new_term_ref()) &&
+	   PL_get_arg(i, t, a) &&
+	   PL_unify_integer(a, v) );
+}
+
+static bool
+unify_str_arg(int i, term_t t, const char *str)
+{ term_t a;
+
+  return ( (a=PL_new_term_ref()) &&
+	   PL_get_arg(i, t, a) &&
+	   PL_unify_chars(a, PL_STRING|REP_EL, (size_t)-1, str) );
 }
 
 
+typedef struct
+{ const char *name;
+  int         code;
+  atom_t      atom;
+} q0_event;			/* Query event without argument */
+
+static q0_event q0_events[] = {
+  { "first", H_FIRST },
+  { "last",  H_LAST },
+  { "prev",  H_PREV },
+  { "next",  H_NEXT },
+  { "curr",  H_CURR },
+  { NULL,    0 }
+};
+
+static bool
+q0_action(atom_t key, int *action)
+{ for(q0_event *ev = q0_events; ev->name; ev++)
+  { if ( !ev->atom )
+      ev->atom = PL_new_atom(ev->name);
+    if ( ev->atom == key )
+    { *action = ev->code;
+      return true;
+    }
+  }
+
+  return false;
+}
 
 static foreign_t
 pl_history(term_t tin, term_t option)
@@ -1975,6 +2034,7 @@ pl_history(term_t tin, term_t option)
   { atom_t name;
     size_t arity;
     int rc = 0;
+    int code;
 
     if ( PL_get_name_arity(option, &name, &arity) )
     { HistEvent ev;
@@ -1993,6 +2053,40 @@ pl_history(term_t tin, term_t option)
 		   PL_unify_integer(a, ev.num) );
 	}
 	return false;
+      } else if ( arity == 2 && q0_action(name, &code) )
+      { if ( history(ctx->history, &ev, code) == 0 )
+	{ return ( unify_int_arg(1, option, ev.num) &&
+		   unify_str_arg(2, option, ev.str) );
+	} else
+	  return false;
+      } else if ( arity == 3 && (name == ATOM_prev_str ||
+				 name == ATOM_next_str) )
+      { char *s;
+	if ( !get_str_arg(1, option, &s) ) return false;
+	code = name == ATOM_prev_str ? H_PREV_STR : H_NEXT_STR;
+	if ( history(ctx->history, &ev, code, s) == 0 )
+	  return ( unify_int_arg(2, option, ev.num) &&
+		   unify_str_arg(3, option, ev.str) );
+	else
+	  return false;
+      } else if ( arity == 2 && name == ATOM_event )
+      { int i;
+	int curr;
+
+	rc = false;
+	if ( !get_int_arg(1, option, &i) ) return false;
+	if ( history(ctx->history, &ev, H_CURR) == 0 )
+	  curr = ev.num;
+	if ( history(ctx->history, &ev, H_SET, i) == 0 )
+	{ if ( history(ctx->history, &ev, H_CURR) == 0 )
+	    rc = unify_str_arg(2, option, ev.str);
+	}
+	history(ctx->history, &ev, H_SET, curr);
+	return rc;
+      } else if ( arity == 1 && name == ATOM_set )
+      { int i;
+	if ( !get_int_arg(1, option, &i) ) return false;
+	rc = history(ctx->history, &ev, H_SET, i);
       } else if ( name == ATOM_clear )
       { if ( arity != 0 ) goto err_domain;
 
@@ -2178,6 +2272,10 @@ install_libedit4pl(void)
   MKATOM(setsize);
   MKATOM(getsize);
   MKATOM(setunique);
+  MKATOM(set);
+  MKATOM(prev_str);
+  MKATOM(next_str);
+  MKATOM(event);
 
   MKFUNCTOR(error, 2);
   MKFUNCTOR(editline, 1);

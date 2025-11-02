@@ -171,6 +171,7 @@ typedef struct el_context
   binding	       *bindings;	/* Bindings to user commands */
   int			reader;		/* Current reader thread */
   unsigned int		flags;		/* Misc flags */
+  int			histsize;	/* History size */
   struct
   { int timeout;			/* Time to wait */
     int move;				/* Amount to move */
@@ -1225,6 +1226,7 @@ prompt(EditLine *el)
 
 static PL_option_t el_wrap_options[] =
 { PL_OPTION("pipes",   OPT_BOOL),
+  PL_OPTION("history", OPT_INT),
   PL_OPTIONS_END
 };
 
@@ -1235,11 +1237,12 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr, term_t options)
   char *prog;
   unsigned int el_flags = 0;
   int pipes = false;
+  int histsize = 100;
 
   if ( !PL_get_chars(progid, &prog, STR_OPTIONS) )
     return FALSE;
   if ( !PL_scan_options(options, 0, "el_wrap_options",
-			el_wrap_options, &pipes) )
+			el_wrap_options, &pipes, &histsize) )
     return FALSE;
   if ( pipes )
     el_flags |= EPILOG;
@@ -1276,7 +1279,8 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr, term_t options)
 	ctx->estream = err;
 
 	ctx->history = history_init();
-	history(ctx->history, &ctx->ev, H_SETSIZE,   100);
+	ctx->histsize = histsize;
+	history(ctx->history, &ctx->ev, H_SETSIZE,   histsize);
 	history(ctx->history, &ctx->ev, H_SETUNIQUE, TRUE);
 
 #ifdef __WINDOWS__
@@ -2044,15 +2048,14 @@ pl_history(term_t tin, term_t option)
 	if ( arity != 1 ) goto err_domain;
 	if ( !get_int_arg(1, option, &s) ) return FALSE;
 	rc = history(ctx->history, &ev, H_SETSIZE, s);
+	if ( rc == 0 )
+	  ctx->histsize = s;
       } else if ( arity == 1 && name == ATOM_getsize )
       { term_t a;
 
-	if ( history(ctx->history, &ev, H_GETSIZE) == 0 )
-	{ return ( (a = PL_new_term_ref()) &&
-		   PL_get_arg(1, option, a) &&
-		   PL_unify_integer(a, ev.num) );
-	}
-	return false;
+	return ( (a = PL_new_term_ref()) &&
+		 PL_get_arg(1, option, a) &&
+		 PL_unify_integer(a, ctx->histsize) );
       } else if ( arity == 2 && q0_action(name, &code) )
       { if ( history(ctx->history, &ev, code) == 0 )
 	{ return ( unify_int_arg(1, option, ev.num) &&

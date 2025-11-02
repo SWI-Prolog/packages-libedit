@@ -61,6 +61,7 @@
 :- autoload(library(apply),[maplist/2,maplist/3]).
 :- autoload(library(lists),[reverse/2,max_list/2,append/3,member/2]).
 :- autoload(library(solution_sequences),[call_nth/2]).
+:- autoload(library(option), [merge_options/3]).
 
 :- use_foreign_library(foreign(libedit4pl)).
 
@@ -83,7 +84,6 @@ streams and program the library.
 */
 
 el_wrap_if_ok :-
-    \+ current_prolog_flag(console_menu_version, qt),
     \+ current_prolog_flag(readline, readline),
     stream_property(user_input, tty(true)),
     !,
@@ -99,8 +99,17 @@ el_wrap_if_ok.
 %   low level predicates  that  allows   for  applying  and  programming
 %   libedit in non-standard situations.
 %
-%   The library is registered  with  _ProgName_   set  to  =swipl=  (see
+%   The library is registered  with  _ProgName_   set  to  `swipl`  (see
 %   el_wrap/4).
+%
+%   Options processed:
+%
+%     - pipes(+Boolean)
+%       Used by Epilog windows to indicate we are reading from a Windows
+%       named pipe in _overlapped_ mode.  Ignored on other platforms.
+%     - history(+Size)
+%       Size of the history.  Default is defined by the Prolog flag
+%       `history` or `100` if this flag is not defined.
 
 el_wrap :-
     el_wrap([]).
@@ -110,10 +119,21 @@ el_wrap(_) :-
     !.
 el_wrap(Options) :-
     stream_property(user_input, tty(true)), !,
-    el_wrap(swipl, user_input, user_output, user_error, Options),
+    findall(Opt, history_default(Opt), Defaults),
+    merge_options(Options, Defaults, Options1),
+    el_wrap(swipl, user_input, user_output, user_error, Options1),
     add_prolog_commands(user_input),
     forall(el_setup(user_input), true).
 el_wrap(_).
+
+history_default(history(Size)) :-
+    current_prolog_flag(history, Value),
+    (   integer(Value),
+        Value >= 0
+    ->  Size = Value
+    ;   Value == false
+    ->  Size = 0
+    ).
 
 add_prolog_commands(Input) :-
     el_addfn(Input, complete, 'Complete atoms and files', complete),
@@ -245,8 +265,11 @@ el_wrap(ProgName, In, Out, Error) :-
 %     - setsize(+Integer)
 %       Set size of history to size elements.
 %     - getsize(-Integer)
-%       Unify Integer with the number of saved events, i.e., __not__
-%       the maximum size of the history.   See also el_history_events/2.
+%       Unify Integer with the maximum size of the history.  Note that
+%       this is _not_ the same as el_history() using ``H_GETSIZE``,
+%       which returns the number of currently saved events. The number
+%       of saved events may be computed from `first` and `last` or
+%       using el_history_events/2.
 %     - setunique(+Boolean)
 %       Set flag that adjacent identical event strings should not be
 %       entered into the history.
@@ -256,7 +279,8 @@ el_wrap(ProgName, In, Out, Error) :-
 %     - prev(-Num, -String)
 %     - next(-Num, -String)
 %       Retrieve an event.  Num is the event number and String is the
-%       event string.
+%       event string.  Note that `first` is the most recent event and
+%       `last` the oldest.
 %     - set(Num)
 %       Set the notion of _current_ to Num.
 %     - prev_str(+Search, -Num, -String)
@@ -298,18 +322,41 @@ el_wrap(ProgName, In, Out, Error) :-
 %   which implies that the actual version of the shared library may be
 %   different.
 
+%!  prolog:history(+Input, ?Action) is semidet.
+%
+%   Provide  the  plugable  interface  into   the  system  command  line
+%   management.
+
 :- multifile
     prolog:history/2.
 
+prolog:history(Input, enabled) :-
+    !,
+    el_wrapped(Input),
+    el_history(Input, getsize(Size)),
+    Size > 0.
 prolog:history(Input, add(Line)) :-
+    !,
     el_add_history(Input, Line).
 prolog:history(Input, load(File)) :-
+    !,
     compat_read_history(Input, File).
 prolog:history(Input, save(File)) :-
+    !,
     el_write_history(Input, File).
-prolog:history(Input, load) :-
-    el_history_events(Input, Events),
-    load_history_events(Events).
+prolog:history(Input, events(Events)) :-
+    !,
+    el_history_events(Input, Events).
+prolog:history(Input, Command) :-
+    public_command(Command),
+    !,
+    el_history(Input, Command).
+
+public_command(first(_Num, _String)).
+public_command(curr(_Num, _String)).
+public_command(event(_Num, _String)).
+public_command(prev_str(_Search, _Num, _String)).
+public_command(clear).
 
 %!  compat_read_history(+Input, +File) is det.
 %
@@ -336,25 +383,6 @@ read_old_history(Input, From) :-
         el_add_history(Input, Event),
         read_old_history(Input, From)
     ).
-
-%!  load_history_events(+Events)
-%
-%   Load events into the history handling of `boot/history.pl`
-
-load_history_events(Events) :-
-    '$reverse'(Events, RevEvents),
-    forall('$member'(Ev, RevEvents),
-           add_event(Ev)).
-
-add_event(Num-String) :-
-    remove_dot(String, String1),
-    '$save_history_event'(Num-String1).
-
-remove_dot(String0, String) :-
-    string_concat(String, ".", String0),
-    !.
-remove_dot(String, String).
-
 
 		 /*******************************
 		 *        ELECTRIC CARET	*

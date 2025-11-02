@@ -2074,17 +2074,17 @@ pl_history(term_t tin, term_t option)
 	  return false;
       } else if ( arity == 2 && name == ATOM_event )
       { int i;
-	int curr;
 
 	rc = false;
 	if ( !get_int_arg(1, option, &i) ) return false;
 	if ( history(ctx->history, &ev, H_CURR) == 0 )
-	  curr = ev.num;
-	if ( history(ctx->history, &ev, H_SET, i) == 0 )
-	{ if ( history(ctx->history, &ev, H_CURR) == 0 )
-	    rc = unify_str_arg(2, option, ev.str);
+	{ int curr = ev.num;
+	  if ( history(ctx->history, &ev, H_SET, i) == 0 )
+	  { if ( history(ctx->history, &ev, H_CURR) == 0 )
+	      rc = unify_str_arg(2, option, ev.str);
+	  }
+	  history(ctx->history, &ev, H_SET, curr);
 	}
-	history(ctx->history, &ev, H_SET, curr);
 	return rc;
       } else if ( arity == 1 && name == ATOM_set )
       { int i;

@@ -170,6 +170,7 @@ typedef struct el_context
   command	       *commands;	/* User commands */
   binding	       *bindings;	/* Bindings to user commands */
   int			reader;		/* Current reader thread */
+  bool			is_stdin;	/* Reading from file 0 */
   unsigned int		flags;		/* Misc flags */
   int			histsize;	/* History size */
   struct
@@ -423,11 +424,11 @@ el_sighandler(int sig)
 
 static const char *
 el_siggets(EditLine *el, int *count)
-{ const char *line;
-  FILE *in;
+{ el_context *ctx;
+  const char *line;
 
-  el_get(el, EL_GETFP, 0, &in);
-  if ( fileno(in) == 0 )
+  el_get(el, EL_CLIENTDATA, (void**)&ctx);
+  if ( ctx->is_stdin )
   { prepare_signals(el_signals);
     line = el_gets(el, count);
     restore_signals(el_signals);
@@ -1272,6 +1273,7 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr, term_t options)
 	setlinebuf(fin);
 	setlinebuf(fout);
 	setbuf(ferr, NULL);
+	ctx->is_stdin = (fd_in == 0);
 #endif
 	ctx->flags   = el_flags;
 	ctx->istream = in;

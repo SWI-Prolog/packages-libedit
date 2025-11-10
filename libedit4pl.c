@@ -677,8 +677,12 @@ refresh(el_context *ctx)
   HANDLE hErr;
   el_get(ctx->el, EL_GETHANDLE, 2, &hErr);
   el_resize(ctx->el);
-  const wchar_t *nl = L"\n";
-  WriteConsoleW(hErr, nl, wcslen(nl), NULL, NULL);
+  if ( (ctx->flags&EPILOG) )
+  { WriteFile(hErr, "\r", 1, NULL, NULL);
+  } else
+  { const wchar_t *nl = L"\r";
+    WriteConsoleW(hErr, nl, wcslen(nl), NULL, NULL);
+  }
 #else
   FILE *err;
 

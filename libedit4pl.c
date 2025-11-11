@@ -183,7 +183,7 @@ typedef struct el_context
 #endif
 } el_context;
 
-static el_context *el_clist;
+static el_context *el_clist = NULL;
 
 static el_context *
 get_context(os_handle fd)
@@ -191,6 +191,18 @@ get_context(os_handle fd)
 
   for(c=el_clist; c; c=c->next)
   { if ( c->fd == fd )
+      return c;
+  }
+
+  return NULL;
+}
+
+static el_context *
+get_std_context(void)
+{ el_context *c;
+
+  for(c=el_clist; c; c=c->next)
+  { if ( c->is_stdin )
       return c;
   }
 
@@ -302,7 +314,15 @@ el_cursor_emulated(EditLine *el, int count)
 #ifdef O_SIGNALS
 
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-This code is copied from our GNU libreadline wrapper.
+Signal handling.   The original design  sets up and tears  down signal
+handlers  while   inside  libedit's  main  function   el_gets().   See
+el_siggets() in this file.  Signal handling is only setup for the main
+thread, i.e., for `swipl`.
+
+We must ensure Epilog windows  handle resizing properly.  On an Epilog
+window resize, Epilog  updates the size in the PTY  and sends SIGWINCH
+to the Prolog client thread using pthread_kill().  We must ensure that
+SIGWINCH is always handled.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 typedef struct
@@ -313,8 +333,21 @@ typedef struct
 
 static void el_sighandler(int sig);
 
+/* Signals that should always be handled by this library */
+static sigstate always_signals[] =
+{ { SIGWINCH },
+  { -1 }
+};
+static bool always_signals_prepared = false;
+
+/* Signals handled while we are inside el_gets().
+ * el_signals[0] is SWI-Prolog's _alert_ signal, i.e., the signal
+ * used to make blocking system calls return using EINTR such that
+ * we can process synchronous Prolog signals.
+ */
 static sigstate el_signals[] =
-{ { SIGINT },
+{ { SIGUSR2 },			/* See above.  Must be first */
+  { SIGINT },
 #ifdef SIGTSTP
   { SIGTSTP },
   { SIGCONT },
@@ -324,11 +357,10 @@ static sigstate el_signals[] =
   { SIGALRM },
   { SIGTERM },
   { SIGQUIT },
-  { SIGWINCH },
-  { SIGUSR2 },				/* SWI-Prolog thread alert */
   { -1 }
 };
 
+/* Signals after we were stopped by SIGTSTP */
 static sigstate cont_signals[] =
 {
 #ifdef SIGCONT
@@ -362,6 +394,24 @@ restore_signals(sigstate *s)
 }
 
 
+/** Our signal handler.  Deals with
+ *
+ *  - SIGWINCH
+ *    Just causes read() to return.
+ *  - SIGTSTP/SIGCONT
+ *    Restores terminal around ^Z/fg
+ *  - SIGINT
+ *    Clears accumulated line
+ *  - SWI-Prolog alert signal
+ *    Just causes a return.  This implies the synchronous
+ *    interrupt handler is executed while editline is enabled,
+ *    but there is little we can do about that.  Possibly we
+ *    need a hook in Prolog to save/restore the terminal during
+ *    the actual synchronous signal handling?
+ *  - Other signals
+ *    Restores terminal while calling the default handler.
+ */
+
 static void
 el_sighandler(int sig)
 { sigstate *s;
@@ -374,7 +424,7 @@ el_sighandler(int sig)
   { case SIGWINCH:
       return;
     case SIGCONT:
-      if ( (ctx = get_context(0)) )
+      if ( (ctx = get_std_context()) )
 	el_set(ctx->el, EL_PREP_TERM, 1);
       restore_signals(cont_signals);
       prepare_signals(el_signals);
@@ -382,12 +432,12 @@ el_sighandler(int sig)
     case SIGTSTP:
       restore_signals(el_signals);
       prepare_signals(cont_signals);
-      if ( (ctx = get_context(0)) )
+      if ( (ctx = get_std_context()) )
 	el_set(ctx->el, EL_PREP_TERM, 0);
       kill(getpid(), sig);
       return;
     case SIGINT:
-    { if ( (ctx = get_context(0)) )
+    { if ( (ctx = get_std_context()) )
       { FILE *err;
 	int size = el_cursor(ctx->el, 10000);
 
@@ -396,10 +446,14 @@ el_sighandler(int sig)
 	fprintf(err, "^C\n");
       }
     }
+    default:
+      /* The Prolog alert signal */
+      if ( sig == el_signals[0].signo )
+	return;
   }
 
   restore_signals(el_signals);
-  if ( (ctx = get_context(0)) )
+  if ( (ctx = get_std_context()) )
     el_set(ctx->el, EL_PREP_TERM, 0);
 
   for(s=el_signals; s->signo != -1; s++)
@@ -416,7 +470,7 @@ el_sighandler(int sig)
     }
   }
 
-  if ( (ctx = get_context(0)) )
+  if ( (ctx = get_std_context()) )
     el_set(ctx->el, EL_PREP_TERM, 1);
   prepare_signals(el_signals);
 }
@@ -439,9 +493,21 @@ el_siggets(EditLine *el, int *count)
   return line;
 }
 
+static void
+update_always_signals(void)
+{ if ( el_clist && !always_signals_prepared )
+  { prepare_signals(always_signals);
+    always_signals_prepared = true;
+  } else if ( !el_clist && always_signals_prepared )
+  { restore_signals(always_signals);
+    always_signals_prepared = false;
+  }
+}
+
 #else /* O_SIGNALS */
 
 #define el_siggets(el, count) el_gets(el, count)
+#define update_always_signals() (void)0
 #define SIGWINCH 1
 
 #endif /* O_SIGNALS */
@@ -1230,27 +1296,35 @@ prompt(EditLine *el)
 
 
 static PL_option_t el_wrap_options[] =
-{ PL_OPTION("pipes",   OPT_BOOL),
-  PL_OPTION("history", OPT_INT),
+{ PL_OPTION("pipes",       OPT_BOOL),
+  PL_OPTION("history",     OPT_INT),
+  PL_OPTION("alert_signo", OPT_INT),
   PL_OPTIONS_END
 };
 
 static foreign_t
 pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr, term_t options)
 { IOSTREAM *in = NULL, *out = NULL, *err = NULL;
-  int rc = FALSE;
+  bool rc = false;
   char *prog;
   unsigned int el_flags = 0;
   int pipes = false;
   int histsize = 100;
+  int alert = 0;
 
   if ( !PL_get_chars(progid, &prog, STR_OPTIONS) )
     return FALSE;
   if ( !PL_scan_options(options, 0, "el_wrap_options",
-			el_wrap_options, &pipes, &histsize) )
+			el_wrap_options, &pipes, &histsize, &alert) )
     return FALSE;
   if ( pipes )
     el_flags |= EPILOG;
+#ifdef O_SIGNALS
+  if ( alert )
+    el_signals[0].signo = alert;
+#else
+  (void)alert;
+#endif
 
   if ( PL_get_stream(tin,  &in,  SIO_INPUT) &&
        PL_get_stream(tout, &out, SIO_OUTPUT) &&
@@ -1323,7 +1397,9 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr, term_t options)
 	out->flags |= SIO_RECORDPOS;
 	err->flags |= SIO_RECORDPOS;
 
-	rc = TRUE;
+	update_always_signals();
+
+	rc = true;
       } else
       { rc = PL_permission_error("el_wrap", "stream", tin);
 	/* should indicate we are already wrapped */
@@ -1444,17 +1520,13 @@ pl_unwrap(term_t tin)
 #endif
 
     el_end(ctx->el);
-
-    /*  FIXME: We should close the FILE*, but fclose() also closes the
-     *  underlying descriptor.
-     */
-
     PL_free(ctx);
+    update_always_signals();
 
-    return TRUE;
+    return true;
   }
 
-  return FALSE;
+  return false;
 }
 
 

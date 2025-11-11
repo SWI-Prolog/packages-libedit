@@ -119,14 +119,14 @@ el_wrap(_) :-
     !.
 el_wrap(Options) :-
     stream_property(user_input, tty(true)), !,
-    findall(Opt, history_default(Opt), Defaults),
+    findall(Opt, el_default(Opt), Defaults),
     merge_options(Options, Defaults, Options1),
     el_wrap(swipl, user_input, user_output, user_error, Options1),
     add_prolog_commands(user_input),
     forall(el_setup(user_input), true).
 el_wrap(_).
 
-history_default(history(Size)) :-
+el_default(history(Size)) :-
     current_prolog_flag(history, Value),
     (   integer(Value),
         Value >= 0
@@ -134,6 +134,11 @@ history_default(history(Size)) :-
     ;   Value == false
     ->  Size = 0
     ).
+:- if(current_predicate(prolog_alert_signal/2)).
+el_default(alert_signo(SigNo)) :-
+    prolog_alert_signal(SigName, SigName),
+    current_signal(SigName, SigNo, _Handler).
+:- endif.
 
 add_prolog_commands(Input) :-
     el_addfn(Input, complete, 'Complete atoms and files', complete),

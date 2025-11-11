@@ -197,6 +197,7 @@ get_context(os_handle fd)
   return NULL;
 }
 
+#ifdef O_SIGNALS
 static el_context *
 get_std_context(void)
 { el_context *c;
@@ -208,6 +209,7 @@ get_std_context(void)
 
   return NULL;
 }
+#endif
 
 static el_context *
 get_context_from_handle(void *handle)
@@ -970,14 +972,16 @@ read_char(EditLine *el, el_char_t *cp)
 
  again:
   if ( !(ctx->flags&EPILOG) )	/* Epilog event dispatching is from the console thread */
-  { ctx->sig_no = 0;
-    if ( !PL_dispatch(ctx->istream, PL_DISPATCH_WAIT) )
+  { if ( !PL_dispatch(ctx->istream, PL_DISPATCH_WAIT) )
     { Sset_exception(ctx->istream, PL_exception(0));
       *cp = (el_char_t)'\0';
       return -1;
     }
-    if ( ctx->sig_no == SIGWINCH )
-      refresh(ctx);
+  }
+
+  if ( ctx->sig_no == SIGWINCH )
+  { refresh(ctx);
+    ctx->sig_no = 0;
   }
 
 #ifdef __WINDOWS__
@@ -1064,7 +1068,6 @@ read_char(EditLine *el, el_char_t *cp)
 	el_set(el, EL_REFRESH);
 	goto again;
       case SIGWINCH:
-	refresh(ctx);
 	goto again;
       default:
 	break;

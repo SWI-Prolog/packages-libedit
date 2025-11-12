@@ -1843,6 +1843,8 @@ pl_set(term_t tin, term_t option)
 #endif
       { return false;
       }
+
+      (void)a;
     } else
     { return PL_type_error("compound", option);
     }

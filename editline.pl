@@ -44,6 +44,7 @@
 
             el_source/2,                        % +Input, +File
             el_bind/2,                          % +Input, +Args
+            el_set/2,                           % +Input, +Action
             el_addfn/4,                         % +Input, +Name, +Help, :Goal
             el_cursor/2,                        % +Input, +Move
             el_line/2,                          % +Input, -Line
@@ -110,6 +111,9 @@ el_wrap_if_ok.
 %     - history(+Size)
 %       Size of the history.  Default is defined by the Prolog flag
 %       `history` or `100` if this flag is not defined.
+%     - alert_signo(+Integer)
+%       Signal used for making thread_signal/2 work while the thread
+%       is in a blocking system call.
 
 el_wrap :-
     el_wrap([]).
@@ -123,6 +127,7 @@ el_wrap(Options) :-
     merge_options(Options, Defaults, Options1),
     el_wrap(swipl, user_input, user_output, user_error, Options1),
     add_prolog_commands(user_input),
+    ignore(el_set(user_input, wordchars("_"))),
     forall(el_setup(user_input), true).
 el_wrap(_).
 
@@ -240,6 +245,19 @@ el_wrap(ProgName, In, Out, Error) :-
 %   keyboard sequence.
 %
 %   @see el_set(3) =EL_ADDFN= for details.
+
+%!  el_set(+Input:stream, +Action) is semidet.
+%
+%   Interface to el_set() and el_wset().   Currently provided values for
+%   Action are:
+%
+%     - wordchars(+Text)
+%       Set the characters considered part of a _word_.  This feature
+%       depends on el_wsey() ``EL_WORDCHARS``, which is only provided
+%       in some recent versions of `libedit`.
+%
+%   This predicate fails silently of Action  is not implemented. Illegal
+%   input raises in an exception.
 
 %!  el_line(+Input:stream, -Line) is det.
 %

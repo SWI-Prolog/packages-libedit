@@ -86,6 +86,7 @@ static atom_t ATOM_set;
 static atom_t ATOM_prev_str;
 static atom_t ATOM_next_str;
 static atom_t ATOM_event;
+static atom_t ATOM_wordchars;
 
 static functor_t FUNCTOR_error2;
 static functor_t FUNCTOR_editline1;
@@ -1818,6 +1819,40 @@ pl_bind(term_t tin, term_t options)
 
 
 static foreign_t
+pl_set(term_t tin, term_t option)
+{ el_context *ctx;
+
+  if ( get_el_context(tin, &ctx) )
+  { atom_t name;
+    size_t arity;
+
+    if ( PL_get_name_arity(option, &name, &arity) )
+    { term_t a = PL_new_term_ref();
+
+#ifdef EL_WORDCHARS
+      if ( arity == 1 && name == ATOM_wordchars )
+      { wchar_t *ws;
+	size_t len;
+
+	if ( PL_get_arg(1, option, a) &&
+	     PL_get_wchars(a, &len, &ws, CVT_ALL|CVT_EXCEPTION) )
+	{ return el_wset(ctx->el, EL_WORDCHARS, ws) == 0;
+	} else
+	  return false;
+      } else
+#endif
+      { return false;
+      }
+    } else
+    { return PL_type_error("compound", option);
+    }
+  } else
+    return false;
+}
+
+
+
+static foreign_t
 pl_cursor(term_t tin, term_t move)
 { el_context *ctx;
   int amount;
@@ -2360,6 +2395,7 @@ install_libedit4pl(void)
   MKATOM(prev_str);
   MKATOM(next_str);
   MKATOM(event);
+  MKATOM(wordchars);
 
   MKFUNCTOR(error, 2);
   MKFUNCTOR(editline, 1);
@@ -2373,6 +2409,7 @@ install_libedit4pl(void)
   PL_register_foreign("el_source",	     2,	pl_source,	    0);
   PL_register_foreign("el_addfn",	     4,	pl_addfn,	    0);
   PL_register_foreign("el_bind",	     2,	pl_bind,	    0);
+  PL_register_foreign("el_set",	             2,	pl_set,		    0);
   PL_register_foreign("el_cursor",	     2,	pl_cursor,	    0);
   PL_register_foreign("el_line",	     2,	pl_line,	    0);
   PL_register_foreign("el_insertstr",	     2,	pl_insertstr,	    0);

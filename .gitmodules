@@ -1,0 +1,4 @@
+[submodule "libedit"]
+	path = libedit
+	url = https://github.com/SWI-Prolog/winlibedit.git
+	branch = win32

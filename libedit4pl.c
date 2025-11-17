@@ -63,6 +63,9 @@
 #ifdef HAVE_SYS_IOCTL_H
 #include <sys/ioctl.h>
 #endif
+#ifdef __WINDOWS__
+#include <io.h>
+#endif
 
 #ifndef EPILOG
 #define EPILOG 0x400		/* Windows: Epilog using pipes */
@@ -98,6 +101,10 @@ static functor_t FUNCTOR_pair2;
 #define REP_EL REP_UTF8
 #else
 #define REP_EL REP_MB
+#endif
+
+#ifdef _MSC_VER
+#define strdup(s) _strdup(s)
 #endif
 
 #define STR_OPTIONS (CVT_ATOM|CVT_STRING|CVT_LIST|REP_EL|CVT_EXCEPTION)
@@ -559,6 +566,7 @@ has_interesting_event(HANDLE hIn)
 	case WINDOW_BUFFER_SIZE_EVENT:
 	  return true;
 	default:
+	  (void)0;
       }
     }
     return false;
@@ -571,7 +579,7 @@ static bool
 win_wait_for_key_down(HANDLE hIn, int timeout)
 { ULONGLONG start = GetTickCount64();
   for(;;)
-  { int wait = timeout - (GetTickCount64()-start);
+  { int wait = timeout - (int)(GetTickCount64()-start);
     if ( wait > 0 )
     { DWORD rc = WaitForSingleObject(hIn, wait);
       if ( rc == WAIT_OBJECT_0 )
@@ -750,7 +758,7 @@ refresh(el_context *ctx)
   { WriteFile(hErr, "\r", 1, NULL, NULL);
   } else
   { const wchar_t *nl = L"\r";
-    WriteConsoleW(hErr, nl, wcslen(nl), NULL, NULL);
+    WriteConsoleW(hErr, nl, (DWORD)wcslen(nl), NULL, NULL);
   }
 #else
   FILE *err;
@@ -969,7 +977,7 @@ read_char(EditLine *el, el_char_t *cp)
 
   el_get(el, EL_CLIENTDATA, (void**)&ctx);	/* What to do if we have no context? */
   if ( (num_read=electric_cursor_read_char(ctx, cp)) > 0 )
-    return num_read;
+    return (int)num_read;
 
  again:
   if ( !(ctx->flags&EPILOG) )	/* Epilog event dispatching is from the console thread */
@@ -991,7 +999,7 @@ read_char(EditLine *el, el_char_t *cp)
   el_get(el, EL_GETHANDLE, 0, &hIn);
   if ( ctx->flags & EPILOG )	/* hIn is a Windows pipe */
   { char buffer[10];
-    int start = 0;
+    size_t start = 0;
     ssize_t bytes;
 
     bytes = pipe_read_or_msg(hIn, &buffer[start], 1);
@@ -999,7 +1007,7 @@ read_char(EditLine *el, el_char_t *cp)
     { *cp = 0;		/* end of file */
       return 0;
     } else if ( bytes > 0 )
-    { DWORD more = UTF8_FBN(buffer[0]);
+    { ssize_t more = UTF8_FBN(buffer[0]);
       if ( more == 0 )
       { *cp = buffer[0]&0xff;
 	return 1;
@@ -1051,6 +1059,7 @@ read_char(EditLine *el, el_char_t *cp)
 	  }
 	  case MOUSE_EVENT:
 	  default:
+	    (void)0;
 	}
       }
       goto again;
@@ -1237,7 +1246,7 @@ Sread_libedit(void *handle, char *buf, size_t size)
 	el_get(ctx->el, EL_GETHANDLE, 0, &hIn);
 	BOOL rc = ReadConsoleW(hIn,
 			       buf,
-			       size/sizeof(wchar_t),
+			       (DWORD)size/sizeof(wchar_t),
 			       &done,
 			       NULL);
 	rval = rc ? done*sizeof(wchar_t) : -1;

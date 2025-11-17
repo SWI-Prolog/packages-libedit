@@ -1,13 +1,14 @@
-#cmakedefine HAVE_FCNTL_H
-#cmakedefine HAVE_POLL_H
-#cmakedefine HAVE_SYS_IOCTL_H
-#cmakedefine HAVE_SYS_SELECT_H
-#cmakedefine HAVE_UNISTD_H
+#cmakedefine HAVE_FCNTL_H @HAVE_FCNTL_H@
+#cmakedefine HAVE_POLL_H @HAVE_POLL_H@
+#cmakedefine HAVE_SYS_IOCTL_H @HAVE_SYS_IOCTL_H@
+#cmakedefine HAVE_SYS_SELECT_H @HAVE_SYS_SELECT_H@
+#cmakedefine HAVE_UNISTD_H @HAVE_UNISTD_H@
 
-#cmakedefine HAVE_EL_CURSOR
-#cmakedefine HAVE_EL_WSET
-#cmakedefine HAVE_POLL
-#cmakedefine HAVE_OPEN_MEMSTREAM
-#cmakedefine HAVE_FUNOPEN
+#cmakedefine HAVE_EL_CURSOR @HAVE_EL_CURSOR@
+#cmakedefine HAVE_EL_WSET @HAVE_EL_WSET@
+#cmakedefine HAVE_POLL @HAVE_POLL@
+#cmakedefine HAVE_OPEN_MEMSTREAM @HAVE_OPEN_MEMSTREAM@
+#cmakedefine HAVE_FUNOPEN @HAVE_FUNOPEN@
+#cmakedefine HAVE_WCSDUP @HAVE_WCSDUP@
 
-#cmakedefine O_SIGNALS
+#cmakedefine O_SIGNALS @O_SIGNALS@

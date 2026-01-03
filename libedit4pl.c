@@ -179,6 +179,7 @@ typedef struct el_context
   binding	       *bindings;	/* Bindings to user commands */
   int			reader;		/* Current reader thread */
   bool			is_stdin;	/* Reading from file 0 */
+  short			dispatching;	/* We are dispatching an event */
   unsigned int		flags;		/* Misc flags */
   int			histsize;	/* History size */
   struct
@@ -935,7 +936,10 @@ pipe_read_or_msg(HANDLE hPipe, void *buf, size_t len)
 	    TranslateMessage(&msg);
 	    DispatchMessage(&msg);
 	  }
-	  if ( PL_handle_signals() < 0 )
+	  ctx->dispatching++;
+	  int rc = PL_handle_signals();
+	  ctx->dispatching--;
+	  if ( rc < 0 )
 	  { CloseHandle(ov.hEvent);
 	    return PIPE_READ_PROLOG_EXCEPTION;
 	  }
@@ -981,7 +985,11 @@ read_char(EditLine *el, el_char_t *cp)
 
  again:
   if ( !(ctx->flags&EPILOG) )	/* Epilog event dispatching is from the console thread */
-  { if ( !PL_dispatch(ctx->istream, PL_DISPATCH_WAIT) )
+  { ctx->dispatching++;
+    bool rc = PL_dispatch(ctx->istream, PL_DISPATCH_WAIT);
+    ctx->dispatching--;
+
+    if ( !rc )
     { Sset_exception(ctx->istream, PL_exception(0));
       *cp = (el_char_t)'\0';
       return -1;
@@ -989,7 +997,8 @@ read_char(EditLine *el, el_char_t *cp)
   }
 
   if ( ctx->sig_no == SIGWINCH )
-  { refresh(ctx);
+  { // fprintf(stderr, "Refreshing\n");
+    refresh(ctx);
     ctx->sig_no = 0;
   }
 
@@ -1082,7 +1091,10 @@ read_char(EditLine *el, el_char_t *cp)
       default:
 	break;
     }
-    if ( PL_handle_signals() < 0 )
+    ctx->dispatching++;
+    int rc = PL_handle_signals();
+    ctx->dispatching--;
+    if ( rc < 0 )
     { Sset_exception(ctx->istream, PL_exception(0));
       *cp = (el_char_t)'\0';
       return -1;
@@ -1280,17 +1292,19 @@ Sread_libedit(void *handle, char *buf, size_t size)
 
 
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-The write handler  is  defined  to   deal  with  writes  from background
-threads.
+The write handler is defined to deal with writes from background threads
+as well as  writes  from  interrupt   and  event  dispatching.   It sets
+SIGWINCH, causing read_char() to refresh on the next character typed.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 static ssize_t
 Swrite_libedit(void *handle, char *buf, size_t size)
 { el_context *ctx = get_context_from_ohandle(handle);
 
-  if ( ctx->reader &&
-       ctx->reader != PL_thread_self() )
-  { // fprintf(stderr, "background write %p\n", ctx);
+  if ( ctx->dispatching ||
+       ( ctx->reader &&
+	 ctx->reader != PL_thread_self() ) )
+  { //fprintf(stderr, "background write %p\n", ctx);
     ctx->sig_no = SIGWINCH;			/* simulate a window change */
   }
 

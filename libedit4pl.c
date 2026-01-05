@@ -936,10 +936,7 @@ pipe_read_or_msg(HANDLE hPipe, void *buf, size_t len)
 	    TranslateMessage(&msg);
 	    DispatchMessage(&msg);
 	  }
-	  ctx->dispatching++;
-	  int rc = PL_handle_signals();
-	  ctx->dispatching--;
-	  if ( rc < 0 )
+	  if ( PL_handle_signals() < 0 )
 	  { CloseHandle(ov.hEvent);
 	    return PIPE_READ_PROLOG_EXCEPTION;
 	  }
@@ -1011,7 +1008,9 @@ read_char(EditLine *el, el_char_t *cp)
     size_t start = 0;
     ssize_t bytes;
 
+    ctx->dispatching++;
     bytes = pipe_read_or_msg(hIn, &buffer[start], 1);
+    ctx->dispatching--;
     if ( bytes == 0 )
     { *cp = 0;		/* end of file */
       return 0;
@@ -1023,7 +1022,9 @@ read_char(EditLine *el, el_char_t *cp)
       } else
       { start++;
 	while( more > 0 )
-	{ bytes = pipe_read_or_msg(hIn, &buffer[start], more);
+	{ ctx->dispatching++;
+	  bytes = pipe_read_or_msg(hIn, &buffer[start], more);
+	  ctx->dispatching--;
 	  if ( bytes > 0 )
 	  { more -= bytes;
 	    start += bytes;

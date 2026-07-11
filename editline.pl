@@ -943,14 +943,12 @@ quote_text(_, _, Text, Quoted) =>
     format(string(Quoted), '~q', [Text]).
 
 with_quote_flags(Double, Back, Goal) :-
-    current_prolog_flag(double_quotes, ODouble),
-    current_prolog_flag(back_quotes, OBack),
     setup_call_cleanup(
-        ( set_prolog_flag(double_quotes, Double),
-          set_prolog_flag(back_quotes, Back) ),
+        ( push_prolog_flag(double_quotes, Double),
+          push_prolog_flag(back_quotes, Back) ),
         Goal,
-        ( set_prolog_flag(double_quotes, ODouble),
-          set_prolog_flag(back_quotes, OBack) )).
+        ( pop_prolog_flag(back_quotes),
+          pop_prolog_flag(double_quotes) )).
 
 clipboard_content(Text) :-
     current_prolog_flag(gui, true),

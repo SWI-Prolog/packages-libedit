@@ -1,9 +1,9 @@
 /*  Part of SWI-Prolog
 
     Author:        Jan Wielemaker
-    E-mail:        J.Wielemaker@vu.nl
+    E-mail:        jan@swi-prolog.org
     WWW:           http://www.swi-prolog.org
-    Copyright (c)  2017-2025, VU University Amsterdam
+    Copyright (c)  2017-2026, VU University Amsterdam
 			      CWI, Amsterdam
 			      SWI-Prolog Solutions b.v.
     All rights reserved.
@@ -1462,6 +1462,58 @@ prompt(EditLine *el)
 }
 
 
+#ifdef EL_WCWIDTH
+/* Column width of a code point as rendered by an Epilog terminal.
+ *
+ * When libedit drives an Epilog (xpce) terminal (el_flags&EPILOG), the
+ * on-screen width of a glyph is decided by the terminal font, not by
+ * the static, locale-independent Unicode tables PL_wcwidth() reads.
+ * Symbol and emoji code points that PL_wcwidth() reports as width 1 are
+ * routinely drawn two cells wide by an emoji-presenting font, which
+ * makes libedit's column tracking drift against what Epilog paints.
+ *
+ * Ask Prolog: editline:el_wcwidth/2 (supplied by library(epilog)) which
+ * measures the code point in the current thread's terminal font.  ASCII
+ * is font-independent, so it is handled here without entering Prolog.
+ * Fall back to PL_wcwidth() when the hook is absent, fails or raises. */
+static int
+epilog_wcwidth(int chr)
+{ static predicate_t pred = NULL;
+  int width;
+
+  if ( chr < 0x80 )			/* ASCII: same in any fixed font */
+    return PL_wcwidth(chr);
+
+  if ( !pred )
+    pred = PL_predicate("el_wcwidth", 2, "editline");
+
+  width = PL_wcwidth(chr);		/* used if the hook fails or errors */
+  if ( width < 0 )			/* non-printable */
+    return width;
+
+  fid_t fid;
+  if ( (fid = PL_open_foreign_frame()) )
+  { term_t av = PL_new_term_refs(2);
+
+    if ( av && PL_put_integer(av+0, chr) )
+    { qid_t qid = PL_open_query(NULL, PL_Q_NODEBUG, pred, av);
+      if ( qid )
+      { int w;
+
+	if ( PL_next_solution(qid) && PL_get_integer(av+1, &w) )
+	  width = w;
+	PL_close_query(qid);		/* discards any pending exception */
+      }
+    }
+
+    PL_discard_foreign_frame(fid);
+  }
+
+  return width;
+}
+#endif
+
+
 static PL_option_t el_wrap_options[] =
 { PL_OPTION("pipes",       OPT_BOOL),
   PL_OPTION("history",     OPT_INT),
@@ -1548,10 +1600,13 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr, term_t options)
 	el_set( ctx->el, EL_EDITOR,     "emacs");
 	el_set( ctx->el, EL_CLIENTDATA, ctx);
 #ifdef EL_WCWIDTH
-	/* Share the kernel's mk_wcwidth (via PL_wcwidth) so libedit's
-	 * column tracking matches what the rest of SWI-Prolog uses.
-	 * Only part of our local copy */
-	el_set( ctx->el, EL_WCWIDTH,    PL_wcwidth);
+	/* Column tracking must agree with what the terminal paints.  On a
+	 * real tty that is PL_wcwidth() (the kernel's Unicode tables, as
+	 * used by pl-write/pl-fmt).  On an Epilog terminal the width is
+	 * font-dependent, so route through epilog_wcwidth(), which asks
+	 * Prolog to measure the glyph in the terminal font. */
+	el_set( ctx->el, EL_WCWIDTH,
+		(ctx->flags&EPILOG) ? epilog_wcwidth : PL_wcwidth);
 #endif
 	electric_init(ctx->el);
 

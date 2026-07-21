@@ -74,6 +74,7 @@
 
 :- multifile
     el_setup/1,                         % +Input
+    el_wcwidth/2,                       % +Code, -Columns
     prolog:complete_input/4.
 
 

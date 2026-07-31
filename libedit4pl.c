@@ -45,6 +45,7 @@
 #include <histedit.h>
 #include <errno.h>
 #include <limits.h>
+#include <pthread.h>
 
 #if defined(HAVE_POLL_H) && defined(HAVE_POLL)
 #include <poll.h>
@@ -199,6 +200,9 @@ typedef struct el_context
   short			cols;		/* Terminal size we told libedit */
   short			rows;		/* about.  See check_terminal_size() */
 #endif
+  pthread_mutex_t	paint_lock;	/* Serialise painting the input line */
+  bool			line_hidden;	/* Input line is off the screen */
+  bool			at_bol;		/* Foreign output ended a line */
   unsigned int		flags;		/* Misc flags */
   int			histsize;	/* History size */
   struct
@@ -285,6 +289,8 @@ alloc_context(os_handle fd)
   memset(c, 0, sizeof(*c));
   c->fd    = fd;
   c->magic = EL_CTX_MAGIC;
+  c->at_bol = true;
+  pthread_mutex_init(&c->paint_lock, NULL);
   c->next  = el_clist;
   el_clist = c;
 
@@ -860,25 +866,33 @@ do_read(el_context *ctx, int fd, char *buf, size_t size)
 
 static void
 refresh(el_context *ctx)
-{
+{ /* Foreign output that did not end its line (see Swrite_libedit())
+   * left the caret after the text: start a new line rather than draw
+   * the prompt over what was written. */
+  const char *nl = ( ctx->line_hidden && !ctx->at_bol ) ? "\r\n" : "\r";
+
+  pthread_mutex_lock(&ctx->paint_lock);
 #if __WINDOWS__
   HANDLE hErr;
   el_get(ctx->el, EL_GETHANDLE, 2, &hErr);
   el_resize(ctx->el);
   if ( (ctx->flags&EPILOG) )
-  { WriteFile(hErr, "\r", 1, NULL, NULL);
+  { WriteFile(hErr, nl, (DWORD)strlen(nl), NULL, NULL);
   } else
-  { const wchar_t *nl = L"\r";
-    WriteConsoleW(hErr, nl, (DWORD)wcslen(nl), NULL, NULL);
+  { const wchar_t *wnl = ( nl[1] ? L"\r\n" : L"\r" );
+    WriteConsoleW(hErr, wnl, (DWORD)wcslen(wnl), NULL, NULL);
   }
 #else
   FILE *err;
 
   el_get(ctx->el, EL_GETFP, 2, &err);
   el_resize(ctx->el);
-  fprintf(err, "\r");
+  fprintf(err, "%s", nl);
 #endif
   el_set(ctx->el, EL_REFRESH);
+  ctx->line_hidden = false;
+  ctx->at_bol = true;
+  pthread_mutex_unlock(&ctx->paint_lock);
 }
 
 
@@ -1490,8 +1504,37 @@ Swrite_libedit(void *handle, char *buf, size_t size)
   if ( ctx->dispatching ||
        ( ctx->reader &&
 	 ctx->reader != PL_thread_self() ) )
-  { //fprintf(stderr, "background write %p\n", ctx);
-    ctx->sig_no = SIGWINCH;			/* simulate a window change */
+  { /* Someone writes while the line editor owns the screen.  The test
+     * above holds only while the reader waits for input rather than
+     * paints, so we may take the input line off the screen, write, and
+     * put the line back below the output.  Otherwise the text lands
+     * wherever the caret happens to be -- inside the user's input --
+     * and stays there until the next keystroke redraws the line.
+     *
+     * Output that does not end its line leaves the input line hidden:
+     * the next write continues where this one stopped, and refresh()
+     * completes the line if the user types first.
+     */
+    ssize_t rc;
+
+    pthread_mutex_lock(&ctx->paint_lock);
+    if ( !ctx->line_hidden )
+    { el_set(ctx->el, EL_ERASELINE);
+      ctx->line_hidden = true;
+      ctx->at_bol = true;
+    }
+    rc = (*ctx->orig_functions->write)(handle, buf, size);
+    if ( rc > 0 )
+      ctx->at_bol = ( buf[rc-1] == '\n' );
+    if ( ctx->at_bol )
+    { el_set(ctx->el, EL_REFRESH);
+      ctx->line_hidden = false;
+    } else
+    { ctx->sig_no = SIGWINCH;		/* restore the line on input */
+    }
+    pthread_mutex_unlock(&ctx->paint_lock);
+
+    return rc;
   }
 
   return (*ctx->orig_functions->write)(handle, buf, size);
@@ -1809,6 +1852,7 @@ pl_unwrap(term_t tin)
 #endif
 
     el_end(ctx->el);
+    pthread_mutex_destroy(&ctx->paint_lock);
     PL_free(ctx);
     update_always_signals();
 

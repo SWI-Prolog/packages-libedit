@@ -195,6 +195,10 @@ typedef struct el_context
   bool			is_stdin;	/* Reading from file 0 */
   bool			bracketed_paste;/* Keep bracketed paste mode enabled */
   short			dispatching;	/* We are dispatching an event */
+#ifdef __WINDOWS__
+  short			cols;		/* Terminal size we told libedit */
+  short			rows;		/* about.  See check_terminal_size() */
+#endif
   unsigned int		flags;		/* Misc flags */
   int			histsize;	/* History size */
   struct
@@ -878,6 +882,41 @@ refresh(el_context *ctx)
 }
 
 
+#ifdef __WINDOWS__
+/* An Epilog window cannot raise SIGWINCH on the client thread: resizing
+ * it only updates the size on the stream (see rlc_resize_pty() in
+ * pce/src/txt/terminal.c).  Poll it here, from read_char(), where the
+ * prompt and the input line are on the screen and the cursor sits at
+ * the end of the input -- the state el_resize()'s repaint assumes.
+ * Without this libedit keeps computing rows and columns from the size
+ * the window had when the session started, and editing an input line
+ * that wraps paints on the wrong rows.
+ */
+
+static bool
+terminal_size_changed(el_context *ctx)
+{ short cols, rows;
+
+  if ( (ctx->flags&EPILOG) &&
+       Sgetttysize(ctx->ostream, &cols, &rows) == 0 &&
+       cols > 0 && rows > 0 &&
+       ( cols != ctx->cols || rows != ctx->rows ) )
+  { ctx->cols = cols;
+    ctx->rows = rows;
+    return true;
+  }
+
+  return false;
+}
+
+static void
+check_terminal_size(el_context *ctx)
+{ if ( terminal_size_changed(ctx) )
+    refresh(ctx);
+}
+#endif /*__WINDOWS__*/
+
+
 #ifdef HAVE_EL_WSET
 #define el_char_t wchar_t
 #else
@@ -1106,6 +1145,8 @@ read_char(EditLine *el, el_char_t *cp)
   }
 
 #ifdef __WINDOWS__
+  check_terminal_size(ctx);
+
   HANDLE hIn;
 
   el_get(el, EL_GETHANDLE, 0, &hIn);
@@ -1127,6 +1168,11 @@ read_char(EditLine *el, el_char_t *cp)
     ctx->dispatching++;
     bytes = pipe_read_or_msg(hIn, &buffer[start], 1);
     ctx->dispatching--;
+    /* A resize during the wait raises no signal here, so look again
+     * before handing the character to libedit: the terminal has already
+     * rewrapped, and a key acted on with the old width moves the caret
+     * to a row that no longer holds what libedit thinks it does. */
+    check_terminal_size(ctx);
     if ( bytes == 0 )
     { *cp = 0;		/* end of file */
       return 0;
@@ -1609,6 +1655,19 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr, term_t options)
 		(ctx->flags&EPILOG) ? epilog_wcwidth : PL_wcwidth);
 #endif
 	electric_init(ctx->el);
+
+#ifdef __WINDOWS__
+	/* el_init_handles() ran terminal_init() before EL_GETSZFN and
+	 * EL_CLIENTDATA were set, so it could not ask the Epilog terminal
+	 * for its size and fell back to the console -- which an Epilog
+	 * window does not have.  Now that the hook can find its context,
+	 * ask again.  Without this libedit runs on whatever the fallback
+	 * produced and its column/row arithmetic has nothing to do with
+	 * the window: editing an input line that wraps then paints on the
+	 * wrong rows. */
+	if ( terminal_size_changed(ctx) )
+	  el_resize(ctx->el);
+#endif
 
 	ctx->orig_functions  = in->functions;
 	ctx->functions       = *in->functions;

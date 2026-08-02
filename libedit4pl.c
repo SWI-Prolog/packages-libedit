@@ -187,7 +187,8 @@ typedef struct el_context
   int			sig_no;		/* For read_char() */
   HistEvent		ev;		/* History event */
   History	       *history;	/* Complete history */
-  char		       *prompt;		/* Current prompt */
+  char		       *prompt_raw;	/* Prompt as Prolog gave it */
+  char		       *prompt;		/* Same, with literals delimited */
   IOFUNCTIONS	       *orig_functions;	/* Original functions */
   IOFUNCTIONS		functions;	/* SIO function block */
   command	       *commands;	/* User commands */
@@ -298,15 +299,99 @@ alloc_context(os_handle fd)
 }
 
 
+#define PROMPT_LITERAL '\001'		/* our EL_PROMPT_ESC delimiter */
+
+/* escape_length() returns the length of the ANSI escape sequence starting
+ * at `in' or 0 if there is none.  Recognised are CSI (ESC [ ... final
+ * byte), OSC (ESC ] ... BEL or ESC \) and two-character sequences.
+ */
+
+static size_t
+escape_length(const char *in)
+{ const char *s = in;
+
+  if ( *s != '\033' )
+    return 0;
+
+  switch(*++s)
+  { case '[':				/* CSI */
+      while ( *++s >= 0x20 && *s <= 0x3f )
+	;
+      return (*s >= 0x40 && *s <= 0x7e) ? (size_t)(s+1-in) : 0;
+    case ']':				/* OSC */
+      while ( *++s )
+      { if ( *s == '\007' )
+	  return (size_t)(s+1-in);
+	if ( *s == '\033' && s[1] == '\\' )
+	  return (size_t)(s+2-in);
+      }
+      return 0;
+    default:
+      while ( *s >= 0x20 && *s <= 0x2f )	/* intermediate bytes */
+	s++;
+      return *s ? (size_t)(s+1-in) : 0;
+  }
+}
+
+
+/* prompt_with_literals() surrounds each run of escape sequences with the
+ * EL_PROMPT_ESC delimiter, so libedit emits them without counting them as
+ * columns.  Delimiters already present are honoured (\002 is mapped to
+ * \001, as readline uses two different ones).  Adjacent runs are merged:
+ * libedit attaches the character following a group to it, so two groups
+ * in a row would make the delimiter itself that character.
+ */
+
+static char *
+prompt_with_literals(const char *in)
+{ char *out = malloc(strlen(in)*2+1);	/* worst case: all escapes */
+  const char *s;
+  char *o;
+  bool literal = false;			/* inside a delimited run */
+
+  if ( !out )
+    return NULL;
+
+  for(s=in, o=out; *s; )
+  { size_t esclen;
+
+    if ( *s == PROMPT_LITERAL || *s == '\002' )
+    { *o++ = PROMPT_LITERAL;
+      literal = !literal;
+      s++;
+    } else if ( !literal && (esclen=escape_length(s)) )
+    { if ( o > out && o[-1] == PROMPT_LITERAL )
+	o--;				/* merge with the previous run */
+      else
+	*o++ = PROMPT_LITERAL;
+      do
+      { memcpy(o, s, esclen);
+	o += esclen;
+	s += esclen;
+      } while ( (esclen=escape_length(s)) );
+      *o++ = PROMPT_LITERAL;
+    } else
+    { *o++ = *s++;
+    }
+  }
+  *o = '\0';
+
+  return out;
+}
+
+
 static void
 update_prompt(el_context *ctx)
 { char *np = PL_prompt_string(ctx->istream);
 
-  if ( ctx->prompt && np && strcmp(np, ctx->prompt) == 0 )
+  if ( ctx->prompt_raw && np && strcmp(np, ctx->prompt_raw) == 0 )
     return;
-  if ( ctx->prompt )
-    free(ctx->prompt);
-  ctx->prompt = np ? strdup(np) : NULL;
+
+  free(ctx->prompt);
+  free(ctx->prompt_raw);
+  ctx->prompt = ctx->prompt_raw = NULL;
+  if ( np && (ctx->prompt=prompt_with_literals(np)) )
+    ctx->prompt_raw = strdup(np);
 }
 
 
@@ -1684,7 +1769,7 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr, term_t options)
 #else
 	el_set(ctx->el, EL_GETCFN,      read_char);
 #endif
-	el_set( ctx->el, EL_PROMPT,     prompt);
+	el_set( ctx->el, EL_PROMPT_ESC, prompt, PROMPT_LITERAL);
 	el_set( ctx->el, EL_HIST,       history, ctx->history);
 	el_set( ctx->el, EL_EDITOR,     "emacs");
 	el_set( ctx->el, EL_CLIENTDATA, ctx);
@@ -1836,6 +1921,8 @@ pl_unwrap(term_t tin)
 
     if ( ctx->prompt )
       free(ctx->prompt);
+    if ( ctx->prompt_raw )
+      free(ctx->prompt_raw);
 
     ctx->istream->functions = ctx->orig_functions;
     ctx->ostream->functions = ctx->orig_functions;

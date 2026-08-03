@@ -1702,15 +1702,23 @@ Swrite_libedit(void *handle, char *buf, size_t size)
      * Output that does not end its line leaves the input line hidden:
      * the next write continues where this one stopped, and refresh()
      * completes the line if the user types first.
+     *
+     * Taking the line off the screen needs EL_ERASELINE, which is an
+     * addition of ours: the binding still builds against a stock
+     * libedit (SYSTEM_LIBEDIT, never on Windows), and there the text
+     * goes out where the caret is and the line is put back on the next
+     * key, which is all that can be done without it.
      */
     ssize_t rc;
 
     pthread_mutex_lock(&ctx->paint_lock);
+#ifdef EL_ERASELINE			/* our copy of libedit; see below */
     if ( !ctx->line_hidden )
     { el_set(ctx->el, EL_ERASELINE);
       ctx->line_hidden = true;
       ctx->at_bol = true;
     }
+#endif
     rc = (*ctx->orig_functions->write)(handle, buf, size);
     if ( rc > 0 )
       ctx->at_bol = ends_at_bol(ctx, buf, (size_t)rc);
@@ -1739,7 +1747,7 @@ Swrite_libedit(void *handle, char *buf, size_t size)
 	       (int)rc, (int)ctx->at_bol, tail,
 	       ctx->at_bol ? "EL_REFRESH" : "defer to the next key");
     }
-    if ( ctx->at_bol )
+    if ( ctx->at_bol && ctx->line_hidden )
     { el_set(ctx->el, EL_REFRESH);
       ctx->line_hidden = false;
     } else

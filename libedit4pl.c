@@ -1334,7 +1334,20 @@ read_char(EditLine *el, el_char_t *cp)
      * à), which libedit then renders as its control-char escape
      * '^Å' (^ followed by 0x85|0x40 = 0xC5 = Å).  Using W makes the
      * event carry the real UTF-16 code unit. */
-    BOOL rc = ReadConsoleInputW(hIn, &ev, 1, &done);
+    /* Record that this thread is the one waiting for a key, the way
+     * do_read() does on Unix.  Swrite_libedit() reads that to tell
+     * output from another thread apart from output by the reader
+     * itself: only for the former may it take the input line off the
+     * screen, write, and put the line back below.  Without it the
+     * console branch never looked like it was reading, and a
+     * background thread's output was written straight into the line
+     * the user was editing. */
+    BOOL rc;
+    int oreader = ctx->reader;
+
+    ctx->reader = PL_thread_self();
+    rc = ReadConsoleInputW(hIn, &ev, 1, &done);
+    ctx->reader = oreader;
     if ( rc )
     { if ( done == 1 )
       { switch(ev.EventType)

@@ -1597,6 +1597,68 @@ as well as  writes  from  interrupt   and  event  dispatching.   It sets
 SIGWINCH, causing read_char() to refresh on the next character typed.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
+/* One unit of the encoded text a stream write handler is given. */
+
+static int
+enc_unit(const char *buf, size_t i, bool wide)
+{ if ( wide )
+  { wchar_t wc;
+
+    memcpy(&wc, buf+i, sizeof(wc));
+    return (int)wc;
+  }
+
+  return (int)(unsigned char)buf[i];
+}
+
+
+/* Did this write leave the caret at the start of a line?
+ *
+ * Not a question the last byte can answer.  A write handler is handed
+ * the *encoded* text, and the encoding of a Windows console stream is
+ * wchar: writeln/1 arrives as "hello\r\n" in UTF-16, whose last byte is
+ * the zero half of the newline.  Taking that for a line that had not
+ * ended left the input line off the screen -- the output overwrote the
+ * prompt and no new prompt appeared until a key was pressed.
+ *
+ * Walk the text a character at a time, skip the escape sequences, and
+ * report on the last one that actually moves the caret.  A carriage
+ * return puts the caret in column 0 but leaves the line's content, so
+ * it does not count as having ended it.
+ */
+
+static bool
+ends_at_bol(el_context *ctx, const char *buf, size_t size)
+{ bool wide = ( ctx->ostream && ctx->ostream->encoding == ENC_WCHAR );
+  size_t step = wide ? sizeof(wchar_t) : 1;
+  bool bol = false;
+
+  for(size_t i=0; i+step <= size; i += step)
+  { int c = enc_unit(buf, i, wide);
+
+    if ( c == 27 )				/* ESC: skip the sequence */
+    { i += step;
+      if ( i+step <= size && enc_unit(buf, i, wide) == '[' )
+      { i += step;				/* CSI: parameters, then */
+	while( i+step <= size )			/* one final byte */
+	{ int p = enc_unit(buf, i, wide);
+
+	  if ( p < 0x20 || p > 0x3F )
+	    break;
+	  i += step;
+	}
+      }
+    } else if ( c == '\n' )
+    { bol = true;
+    } else if ( c != '\r' )
+    { bol = false;
+    }
+  }
+
+  return bol;
+}
+
+
 /* Trace of the decisions that put foreign output on the screen.  Set
  * SWIPL_LIBEDIT_DEBUG to a file name to switch it on; it is off
  * otherwise.  It writes straight to a file rather than through a Prolog
@@ -1651,10 +1713,32 @@ Swrite_libedit(void *handle, char *buf, size_t size)
     }
     rc = (*ctx->orig_functions->write)(handle, buf, size);
     if ( rc > 0 )
-      ctx->at_bol = ( buf[rc-1] == '\n' );
-    el_debug("  took the line down, wrote rc=%d at_bol=%d -> %s\n",
-	     (int)rc, (int)ctx->at_bol,
-	     ctx->at_bol ? "EL_REFRESH" : "defer to the next key");
+      ctx->at_bol = ends_at_bol(ctx, buf, (size_t)rc);
+    { char tail[64];
+      bool wide = ( ctx->ostream && ctx->ostream->encoding == ENC_WCHAR );
+      size_t step = wide ? sizeof(wchar_t) : 1;
+      size_t i, n = 0, from = ((size_t)rc > 24*step) ? (size_t)rc-24*step : 0;
+
+      from -= from % step;
+      for(i=from; i+step<=(size_t)rc && n < sizeof(tail)-6; i += step)
+      { int c = enc_unit(buf, i, wide);
+
+	if ( c == 27 )
+	  n += (size_t)snprintf(tail+n, sizeof(tail)-n, "<ESC>");
+	else if ( c == '\n' )
+	  n += (size_t)snprintf(tail+n, sizeof(tail)-n, "<NL>");
+	else if ( c == '\r' )
+	  n += (size_t)snprintf(tail+n, sizeof(tail)-n, "<CR>");
+	else if ( c >= 0x20 && c < 0x7F )
+	  tail[n++] = (char)c;
+	else
+	  n += (size_t)snprintf(tail+n, sizeof(tail)-n, "<%04x>", c);
+      }
+      tail[n] = 0;
+      el_debug("  took the line down, wrote rc=%d at_bol=%d tail=\"%s\" -> %s\n",
+	       (int)rc, (int)ctx->at_bol, tail,
+	       ctx->at_bol ? "EL_REFRESH" : "defer to the next key");
+    }
     if ( ctx->at_bol )
     { el_set(ctx->el, EL_REFRESH);
       ctx->line_hidden = false;

@@ -49,6 +49,19 @@ swipl_plugin(
     C_INCLUDE_DIR ${LIBEDIT_INCLUDE_DIR}
     PL_LIBS editline.pl)
 
+# Drives a Windows console and reads its screen buffer back, so that
+# what swipl.exe draws on a console can be checked against the console
+# rather than against a terminal of our own.  Shares nothing with the
+# binding above, hence a plugin of its own.
+
+if(WIN32)
+  swipl_plugin(
+      winconsole
+      MODULE winconsole4pl
+      C_SOURCES winconsole4pl.c
+      PL_LIBS win_console.pl)
+endif()
+
 pkg_doc(libedit
 	SECTION
             editline.pl)

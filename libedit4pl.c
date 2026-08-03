@@ -45,6 +45,8 @@
 #include <histedit.h>
 #include <errno.h>
 #include <limits.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <pthread.h>
 
 #if defined(HAVE_POLL_H) && defined(HAVE_POLL)
@@ -1595,9 +1597,35 @@ as well as  writes  from  interrupt   and  event  dispatching.   It sets
 SIGWINCH, causing read_char() to refresh on the next character typed.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
+/* Trace of the decisions that put foreign output on the screen.  Set
+ * SWIPL_LIBEDIT_DEBUG to a file name to switch it on; it is off
+ * otherwise.  It writes straight to a file rather than through a Prolog
+ * stream, which is the very thing being traced.
+ */
+
+static void
+el_debug(const char *fmt, ...)
+{ const char *fname = getenv("SWIPL_LIBEDIT_DEBUG");
+  va_list args;
+  FILE *fd;
+
+  if ( !fname || !fname[0] || !(fd=fopen(fname, "a")) )
+    return;
+
+  va_start(args, fmt);
+  vfprintf(fd, fmt, args);
+  va_end(args);
+  fclose(fd);
+}
+
+
 static ssize_t
 Swrite_libedit(void *handle, char *buf, size_t size)
 { el_context *ctx = get_context_from_ohandle(handle);
+
+  el_debug("Swrite: size=%d dispatching=%d reader=%d self=%d hidden=%d\n",
+	   (int)size, ctx->dispatching, ctx->reader, PL_thread_self(),
+	   (int)ctx->line_hidden);
 
   if ( ctx->dispatching ||
        ( ctx->reader &&
@@ -1624,6 +1652,9 @@ Swrite_libedit(void *handle, char *buf, size_t size)
     rc = (*ctx->orig_functions->write)(handle, buf, size);
     if ( rc > 0 )
       ctx->at_bol = ( buf[rc-1] == '\n' );
+    el_debug("  took the line down, wrote rc=%d at_bol=%d -> %s\n",
+	     (int)rc, (int)ctx->at_bol,
+	     ctx->at_bol ? "EL_REFRESH" : "defer to the next key");
     if ( ctx->at_bol )
     { el_set(ctx->el, EL_REFRESH);
       ctx->line_hidden = false;

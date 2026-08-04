@@ -1142,6 +1142,26 @@ utf8_get_char(const char *in, int *chr)
 #define PIPE_READ_ERROR            -1   // Error occurred
 #define PIPE_READ_PROLOG_EXCEPTION -2	// Prolog exception
 
+/* Take a still pending read down before we return.  The kernel owns `ov'
+ * and the buffer we were reading into, and both are locals: `ov' of this
+ * function, the buffer of read_char().  Leaving the read queued lets the
+ * kernel write the next character into a stack frame that is gone by
+ * then, and signal an event we already closed.
+ *
+ * CancelIoEx() races completion, so the wait is not optional.  A
+ * character the kernel delivered while we were cancelling is lost, which
+ * is what we want on the paths that get here: they abandon the read
+ * because Prolog is unwinding, not because anyone waits for the byte.
+ */
+
+static void
+cancel_pending_read(HANDLE hPipe, OVERLAPPED *ov)
+{ DWORD bytes;
+
+  CancelIoEx(hPipe, ov);
+  GetOverlappedResult(hPipe, ov, &bytes, TRUE); /* ERROR_OPERATION_ABORTED */
+}
+
 static ssize_t
 pipe_read_or_msg(HANDLE hPipe, void *buf, size_t len)
 { OVERLAPPED ov = {0};
@@ -1176,18 +1196,21 @@ pipe_read_or_msg(HANDLE hPipe, void *buf, size_t len)
 	  MSG msg;
 	  while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
 	  { if (msg.message == WM_QUIT)
-	    { CloseHandle(ov.hEvent);
+	    { cancel_pending_read(hPipe, &ov);
+	      CloseHandle(ov.hEvent);
 	      return PIPE_READ_EOF;
 	    }
 	    TranslateMessage(&msg);
 	    DispatchMessage(&msg);
 	  }
 	  if ( PL_handle_signals() < 0 )
-	  { CloseHandle(ov.hEvent);
+	  { cancel_pending_read(hPipe, &ov);
+	    CloseHandle(ov.hEvent);
 	    return PIPE_READ_PROLOG_EXCEPTION;
 	  }
 	} else
-	{ CloseHandle(ov.hEvent);
+	{ cancel_pending_read(hPipe, &ov);
+	  CloseHandle(ov.hEvent);
 	  return PIPE_READ_ERROR;
 	}
       }

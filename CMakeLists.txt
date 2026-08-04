@@ -3,6 +3,16 @@ project(swipl-libedit)
 
 include("../cmake/PrologPackage.cmake")
 
+# Debugging aids for the line editor and the terminals it draws on: the
+# refresh trace in libedit itself and library(win_console), which drives
+# a Windows console to read back what was drawn on it.  Neither is of use
+# to a user and the console one is Windows-only, so both are off unless
+# asked for.
+
+option(LIBEDIT_DEBUG
+       "Compile in the libedit debugging aids"
+       OFF)
+
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/libedit/CMakeLists.txt)
   option(SYSTEM_LIBEDIT
 	 "Use OS version of libedit"
@@ -52,9 +62,10 @@ swipl_plugin(
 # Drives a Windows console and reads its screen buffer back, so that
 # what swipl.exe draws on a console can be checked against the console
 # rather than against a terminal of our own.  Shares nothing with the
-# binding above, hence a plugin of its own.
+# binding above, hence a plugin of its own, and nothing but a test reads
+# a screen buffer back, hence LIBEDIT_DEBUG.
 
-if(WIN32)
+if(WIN32 AND LIBEDIT_DEBUG)
   swipl_plugin(
       winconsole
       MODULE winconsole4pl

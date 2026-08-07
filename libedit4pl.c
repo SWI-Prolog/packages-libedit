@@ -66,6 +66,9 @@
 #ifdef HAVE_SYS_IOCTL_H
 #include <sys/ioctl.h>
 #endif
+#ifndef __WINDOWS__
+#include <termios.h>			/* reclaim_tty() */
+#endif
 #ifdef __WINDOWS__
 #include <io.h>
 #endif
@@ -1234,12 +1237,65 @@ pipe_read_or_msg(HANDLE hPipe, void *buf, size_t len)
 
 #endif/* __WINDOWS__ */
 
+#ifndef __WINDOWS__
+/**
+ * Reconnect our private duplicates of the terminal after the kernel
+ * revoked it.
+ *
+ * A process that makes a terminal its controlling terminal -- a child
+ * of shell/1 or process_create/3 on the pty of an epilog window -- is
+ * the session leader of a session that owns a terminal, and BSD
+ * kernels, MacOS among them, revoke such a terminal when its session
+ * leader exits.  Every descriptor on it is detached from the device,
+ * in this process as well, and fails with EIO from then on.
+ *
+ * Prolog reconnects the descriptors of the streams it handed us (see
+ * restore_ctty() in src/os/pl-os.c), but el_wrap/4 gave libedit
+ * duplicates of its own and those it cannot see.  Take the streams as
+ * they are now: if a duplicate is dead where the stream it came from
+ * is alive, it was revoked and the stream has been reconnected, so
+ * duplicating it again puts us back on the terminal.  The stdio error
+ * flags are cleared with it; without that a FILE that saw the EIO
+ * refuses to write.
+ *
+ * Nothing here happens on a system that does not revoke: the
+ * duplicates stay alive and the loop finds nothing to do.
+ */
+
+static bool
+reclaim_tty(el_context *ctx)
+{ IOSTREAM * const streams[3] = { ctx->istream, ctx->ostream, ctx->estream };
+  bool reclaimed = false;
+
+  for(int i=0; i<3; i++)
+  { FILE *fp = NULL;
+    struct termios tio;
+
+    if ( el_get(ctx->el, EL_GETFP, i, &fp) == 0 && fp )
+    { int ours   = fileno(fp);
+      int theirs = Sfileno(streams[i]);
+
+      if ( ours >= 0 && theirs >= 0 &&
+	   tcgetattr(ours, &tio) < 0 &&	    /* ours is gone ... */
+	   tcgetattr(theirs, &tio) == 0 &&  /* ... and Prolog has a live one */
+	   dup2(theirs, ours) >= 0 )
+      { clearerr(fp);
+	reclaimed = true;
+      }
+    }
+  }
+
+  return reclaimed;
+}
+#endif
+
 static int
 read_char(EditLine *el, el_char_t *cp)
 { el_context *ctx;
   ssize_t num_read;
 #ifndef __WINDOWS__
   bool tried = false;
+  bool reclaimed = false;
   char cbuf[MB_LEN_MAX];
   size_t cbp = 0;
   int save_errno = errno;
@@ -1425,6 +1481,12 @@ read_char(EditLine *el, el_char_t *cp)
     if ( e == EINTR )
       continue;
 
+    if ( e == EIO && !reclaimed && reclaim_tty(ctx) )
+    { reclaimed = true;		/* the terminal was revoked; we are back */
+      errno = save_errno;
+      continue;
+    }
+
     if ( !tried && read__fixio(fileno(in), e) == 0 )
     { errno = save_errno;
       tried = true;
@@ -1566,6 +1628,10 @@ Sread_libedit(void *handle, char *buf, size_t size)
     free(old);
     return slen;
   }
+
+#ifndef __WINDOWS__
+  reclaim_tty(ctx);	  /* a child may have taken the terminal down */
+#endif
 
   switch( ttymode )
   { case PL_RAWTTY:			/* get_single_char/1 */

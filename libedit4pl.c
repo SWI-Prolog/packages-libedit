@@ -1289,6 +1289,42 @@ reclaim_tty(el_context *ctx)
 }
 #endif
 
+#ifdef __WINDOWS__
+/* Does this key event merely say that a modifier went down?
+ *
+ * Such an event carries no character, and reporting it as one hands
+ * libedit a NUL.  Windows queues it for the modifier of every combination
+ * typed, including ^C: with ENABLE_PROCESSED_INPUT the console turns the
+ * "C" into a CTRL_C_EVENT and drops it, but leaves the Control that
+ * preceded it in the input buffer.  The interrupt handler then read that
+ * as the answer to its "Action (h for help) ?" and printed "Unknown
+ * option" before the user had touched a key.  See issue #1515.
+ */
+
+static bool
+is_modifier_key(WORD vk)
+{ switch(vk)
+  { case VK_SHIFT:
+    case VK_CONTROL:
+    case VK_MENU:
+    case VK_LSHIFT:
+    case VK_RSHIFT:
+    case VK_LCONTROL:
+    case VK_RCONTROL:
+    case VK_LMENU:
+    case VK_RMENU:
+    case VK_LWIN:
+    case VK_RWIN:
+    case VK_CAPITAL:
+    case VK_NUMLOCK:
+    case VK_SCROLL:
+      return true;
+    default:
+      return false;
+  }
+}
+#endif /*__WINDOWS__*/
+
 static int
 read_char(EditLine *el, el_char_t *cp)
 { el_context *ctx;
@@ -1433,7 +1469,8 @@ read_char(EditLine *el, el_char_t *cp)
     { if ( done == 1 )
       { switch(ev.EventType)
 	{ case KEY_EVENT:
-	  { if ( ev.Event.KeyEvent.bKeyDown )
+	  { if ( ev.Event.KeyEvent.bKeyDown &&
+		 !is_modifier_key(ev.Event.KeyEvent.wVirtualKeyCode) )
 	    { *cp = ev.Event.KeyEvent.uChar.UnicodeChar;
 	      return 1;
 	    }

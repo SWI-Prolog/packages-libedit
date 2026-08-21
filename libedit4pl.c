@@ -1674,7 +1674,10 @@ Sread_libedit(void *handle, char *buf, size_t size)
   { case PL_RAWTTY:			/* get_single_char/1 */
     case PL_NOTTY:			/* -tty */
     { PL_write_prompt(ttymode == PL_NOTTY);
-      PL_dispatch(ctx->istream, PL_DISPATCH_WAIT);
+      if ( !PL_dispatch(ctx->istream, PL_DISPATCH_WAIT) )
+      { Sset_exception(ctx->istream, PL_exception(0));
+	return -1;
+      }
 #ifdef __WINDOWS__
       if ( ttymode == PL_RAWTTY )
       { return read_char(ctx->el, (el_char_t*)buf);

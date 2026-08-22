@@ -646,7 +646,8 @@ complete(Input, _Char, Continue) :-
     ;   get_time(Now),
         retract(last_complete(TLast, Before)),
         Now - TLast < 2
-    ->  nl(user_error),
+    ->  plain_style,
+        nl(user_error),
         list_alternatives(Completions),
         Continue = redisplay
     ;   retractall(last_complete(_,_)),
@@ -688,9 +689,28 @@ ensure_input_completion.
 show_completions(Input, _Char, Continue) :-
     el_line(Input, line(Before, After)),
     prolog:complete_input(Before, After, _Delete, Completions),
+    plain_style,
     nl(user_error),
     list_alternatives(Completions),
     Continue = redisplay.
+
+%!  plain_style is det.
+%
+%   Reset the terminal attributes before writing text that is not part of
+%   the line being edited, such  as   the  completion alternatives or the
+%   incremental search prompt.
+%
+%   The toplevel decorates the input line   by leaving the attributes of
+%   the colour class `input` in effect while the user is typing (see
+%   decorate_prompt/2 in `boot/toplevel.pl`).  Without this reset that
+%   decoration also applies to the text below, and if the class has a
+%   background colour it paints whatever we erase with `\e[K` as well.
+%
+%   The commands that write this text end with `redisplay`, which makes
+%   libedit redraw the line from scratch and thus re-install the style.
+
+plain_style :-
+    format(user_error, '\e[0m', []).
 
 complete_text(Text-_Comment, Text) :- !.
 complete_text(Text, Text).
@@ -883,12 +903,16 @@ find_in_history(Input, For, _, Nth, Line) :-
              Nth),
     !.
 
+%   Note that we reset the attributes  (see   plain_style/0):  the search
+%   prompt is not the line being edited and, more importantly, `\e[0K'
+%   erases using the current background colour.
+
 search_print(State, Search, Current) :-
-    format(user_error, '\r(~wreverse-i-search)`~w\': ~w\e[0K',
+    format(user_error, '\r\e[0m(~wreverse-i-search)`~w\': ~w\e[0K',
            [State, Search, Current]).
 
 clear_line :-
-    format(user_error, '\r\e[0K', []).
+    format(user_error, '\r\e[0m\e[0K', []).
 
 
                 /*******************************

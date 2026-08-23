@@ -694,6 +694,25 @@ show_completions(Input, _Char, Continue) :-
     list_alternatives(Completions),
     Continue = redisplay.
 
+%!  prolog:line_editor_attributes(+Off, +On) is det.
+%
+%   Tell libedit how to switch the  decoration of the line being edited
+%   off and on again.  The toplevel leaves the attributes of the colour
+%   class `input` in effect while the  user is typing (see
+%   decorate_prompt/2 in `boot/toplevel.pl`).  Erasing part of the screen
+%   paints it with the current background colour, so libedit must switch
+%   these attributes off before it erases  the rows the line no longer
+%   uses, e.g. after unwrapping a long line or moving from a multi-line
+%   history entry to a shorter one.  See EL_ATTRS in libedit.
+%
+%   The toplevel calls this each time it builds a prompt, so a theme
+%   loaded at run time is picked up.  Does nothing if libedit is too old
+%   to support this.
+
+prolog:line_editor_attributes(Off, On) :-
+    el_wrapped(user_input),
+    ignore(el_set(user_input, attrs(Off, On))).
+
 %!  plain_style is det.
 %
 %   Reset the terminal attributes before writing text that is not part of

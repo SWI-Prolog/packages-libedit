@@ -110,6 +110,7 @@ static atom_t ATOM_event;
 static atom_t ATOM_wordchars;
 static atom_t ATOM_editor;
 static atom_t ATOM_bracketed_paste;
+static atom_t ATOM_attrs;
 
 static functor_t FUNCTOR_error2;
 static functor_t FUNCTOR_editline1;
@@ -2565,6 +2566,20 @@ pl_set(term_t tin, term_t option)
 	}
 	return false;
       } else
+#ifdef EL_ATTRS
+      if ( arity == 2 && name == ATOM_attrs )
+      { char *off, *on;
+	term_t b = PL_new_term_ref();
+
+	if ( PL_get_arg(1, option, a) &&
+	     PL_get_chars(a, &off, CVT_ATOM|CVT_STRING|CVT_EXCEPTION|REP_MB) &&
+	     PL_get_arg(2, option, b) &&
+	     PL_get_chars(b, &on, CVT_ATOM|CVT_STRING|CVT_EXCEPTION|REP_MB) )
+	  return el_set(ctx->el, EL_ATTRS, off, on) == 0;
+
+	return false;
+      } else
+#endif
       { return false;
       }
 
@@ -3184,6 +3199,7 @@ install_libedit4pl(void)
   MKATOM(wordchars);
   MKATOM(editor);
   MKATOM(bracketed_paste);
+  MKATOM(attrs);
 
   MKFUNCTOR(error, 2);
   MKFUNCTOR(editline, 1);

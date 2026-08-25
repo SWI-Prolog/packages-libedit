@@ -694,7 +694,8 @@ el_siggets(EditLine *el, int *count)
   const char *line;
 
   el_get(el, EL_CLIENTDATA, (void**)&ctx);
-  /* Re-enable bracketed paste mode in case a subprocess disabled it. */
+  /* Re-enable bracketed paste mode in case a subprocess or a single
+     character read (see Sread_libedit()) disabled it. */
   if ( ctx->bracketed_paste )
     el_bracketed_paste(el, true);
 
@@ -1702,7 +1703,16 @@ Sread_libedit(void *handle, char *buf, size_t size)
   switch( ttymode )
   { case PL_RAWTTY:			/* get_single_char/1 */
     case PL_NOTTY:			/* -tty */
-    { PL_write_prompt(ttymode == PL_NOTTY);
+    { /* No line editor owns the input for this read, so say so.  The
+       * Epilog terminal turns a click in the line being edited into
+       * cursor keys while bracketed paste is on, and a single character
+       * read would answer with the ESC of the first of them.
+       * el_siggets() turns the mode back on for the next line.
+       */
+      if ( ctx->bracketed_paste )
+	el_bracketed_paste(ctx->el, false);
+
+      PL_write_prompt(ttymode == PL_NOTTY);
       if ( !PL_dispatch(ctx->istream, PL_DISPATCH_WAIT) )
       { Sset_exception(ctx->istream, PL_exception(0));
 	return -1;

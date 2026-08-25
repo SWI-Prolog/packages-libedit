@@ -203,10 +203,8 @@ typedef struct el_context
   bool			is_stdin;	/* Reading from file 0 */
   bool			bracketed_paste;/* Keep bracketed paste mode enabled */
   short			dispatching;	/* We are dispatching an event */
-#ifdef __WINDOWS__
   short			cols;		/* Terminal size we told libedit */
   short			rows;		/* about.  See check_terminal_size() */
-#endif
   pthread_mutex_t	paint_lock;	/* Serialise painting the input line */
   bool			line_hidden;	/* Input line is off the screen */
   bool			at_bol;		/* Foreign output ended a line */
@@ -987,39 +985,76 @@ refresh(el_context *ctx)
 }
 
 
-#ifdef __WINDOWS__
-/* An Epilog window cannot raise SIGWINCH on the client thread: resizing
- * it only updates the size on the stream (see rlc_resize_pty() in
- * pce/src/txt/terminal.c).  Poll it here, from read_char(), where the
- * prompt and the input line are on the screen and the cursor sits at
- * the end of the input -- the state el_resize()'s repaint assumes.
- * Without this libedit keeps computing rows and columns from the size
- * the window had when the session started, and editing an input line
- * that wraps paints on the wrong rows.
+/* Has the terminal been resized since we last told libedit its size?
+ *
+ * Read from read_char(), where the prompt and the input line are on the
+ * screen and the cursor sits at the end of the input -- the state
+ * el_resize()'s repaint assumes.  Without this libedit keeps computing
+ * rows and columns from a size the terminal no longer has, and editing
+ * an input line that wraps paints on the wrong rows.
+ *
+ * An Epilog window on Windows cannot raise SIGWINCH on the client
+ * thread: resizing it only updates the size on the stream (see
+ * rlc_resize_pty() in pce/src/txt/terminal.c), so there the poll is the
+ * only way the size ever arrives.  On Unix the resize does raise
+ * SIGWINCH, but a signal is not something to rely on for this: one that
+ * arrives while we are already repainting used to be cleared with the
+ * one we were handling, and the size that raised it was then never
+ * picked up.  Both leave libedit painting a wrapped line on rows that
+ * hold something else.
+ *
+ * The first look only records the size: the terminal has not been
+ * resized, we simply had not asked yet.
  */
 
 static bool
 terminal_size_changed(el_context *ctx)
-{ short cols, rows;
+{ short cols = 0, rows = 0;
 
-  if ( (ctx->flags&EPILOG) &&
-       Sgetttysize(ctx->ostream, &cols, &rows) == 0 &&
-       cols > 0 && rows > 0 &&
+#ifdef __WINDOWS__
+  if ( !(ctx->flags&EPILOG) ||
+       Sgetttysize(ctx->ostream, &cols, &rows) != 0 )
+    return false;
+#else
+  FILE *in;
+  struct winsize ws;
+
+  if ( el_get(ctx->el, EL_GETFP, 0, &in) != 0 ||
+       ioctl(fileno(in), TIOCGWINSZ, &ws) != 0 )
+    return false;
+  cols = (short)ws.ws_col;
+  rows = (short)ws.ws_row;
+#endif
+
+  if ( cols > 0 && rows > 0 &&
        ( cols != ctx->cols || rows != ctx->rows ) )
-  { ctx->cols = cols;
+  { bool first = ( ctx->cols == 0 );
+
+    ctx->cols = cols;
     ctx->rows = rows;
-    return true;
+    return !first;
   }
 
   return false;
 }
 
+/* Act on a resize before the character we just read is: a key moves the
+ * caret by rows and columns that libedit has to have right.  A SIGWINCH
+ * repaints whether or not the size itself changed; without one we go by
+ * the size on the terminal.
+ */
+
 static void
 check_terminal_size(el_context *ctx)
-{ if ( terminal_size_changed(ctx) )
+{ bool winch = ( ctx->sig_no == SIGWINCH );
+
+  if ( winch )
+    ctx->sig_no = 0;		/* before the repaint, not after: a resize
+				 * that arrives while we are in it must not
+				 * be cleared along with this one */
+  if ( terminal_size_changed(ctx) || winch )
     refresh(ctx);
 }
-#endif /*__WINDOWS__*/
 
 
 #ifdef HAVE_EL_WSET
@@ -1355,15 +1390,9 @@ read_char(EditLine *el, el_char_t *cp)
     }
   }
 
-  if ( ctx->sig_no == SIGWINCH )
-  { // fprintf(stderr, "Refreshing\n");
-    refresh(ctx);
-    ctx->sig_no = 0;
-  }
-
-#ifdef __WINDOWS__
   check_terminal_size(ctx);
 
+#ifdef __WINDOWS__
   HANDLE hIn;
 
   el_get(el, EL_GETHANDLE, 0, &hIn);
@@ -1535,8 +1564,7 @@ read_char(EditLine *el, el_char_t *cp)
     }
   }
 
-  if ( ctx->sig_no == SIGWINCH )
-    refresh(ctx);
+  check_terminal_size(ctx);	/* before libedit acts on the character */
 
   /* Test for EOF */
   if ( num_read == 0 )

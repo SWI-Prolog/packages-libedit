@@ -84,6 +84,17 @@ This library wraps the BSD  libedit   command  line  editor. The binding
 provides a high level API to enable   command line editing on the Prolog
 user streams and low level predicates  to   apply  the  library on other
 streams and program the library.
+
+While reading a line, the binding surrounds the prompt and the input
+with the OSC 133 _semantic prompt_ marks of FinalTerm: ``ESC]133;A``
+before the prompt, ``ESC]133;B`` before the input and ``ESC]133;C``
+after the line was entered.  A terminal that understands them (Epilog,
+iTerm2, kitty, WezTerm, VS Code) can tell prompt, input and output
+apart, which is what lets it jump between prompts, act on the output of
+one command or, in Epilog, move the caret to a click in the line being
+edited.  A read that asks for a single character, as get_single_char/1
+and the debugger do, is not marked: there is no line being edited
+there.  A terminal that does not know the marks ignores them.
 */
 
 el_wrap_if_ok :-

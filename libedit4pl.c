@@ -303,6 +303,26 @@ alloc_context(os_handle fd)
 }
 
 
+/* The OSC 133 "semantic prompt" marks of FinalTerm, as spoken by
+ * iTerm2, kitty, WezTerm, VS Code and the Epilog terminal: `A' starts a
+ * prompt, `B' ends the prompt and starts the line the user edits, and
+ * `C' ends that line and starts the output of what was entered.  A
+ * terminal that reads them knows what is prompt, what the user typed
+ * and what came out of it.  Epilog uses `B' and `C' to know that there
+ * is a line being edited and where it starts, so that a click in it can
+ * ask us to move the caret there.
+ *
+ * `A' and `B' are part of the prompt rather than written from here, so
+ * that libedit emits them from its display, at the place where the
+ * prompt and the input really start.  See marked_prompt().  A read that
+ * asks for a single character is not marked at all: there is no line
+ * being edited there.
+ */
+
+#define OSC133_PROMPT  "\033]133;A\033\\"
+#define OSC133_INPUT   "\033]133;B\033\\"
+#define OSC133_ENTERED "\033]133;C\033\\"
+
 #define PROMPT_LITERAL '\001'		/* our EL_PROMPT_ESC delimiter */
 
 /* escape_length() returns the length of the ANSI escape sequence starting
@@ -384,6 +404,31 @@ prompt_with_literals(const char *in)
 }
 
 
+/* marked_prompt() surrounds the prompt with the OSC 133 marks that say
+ * where a prompt starts and where the line the user edits starts, and
+ * delimits the result for libedit.  The marks ride along in the prompt
+ * rather than being written once because libedit emits the prompt from
+ * its display: that puts each mark at the place it talks about, and
+ * puts it there again whenever the prompt is drawn somewhere else.
+ */
+
+static char *
+marked_prompt(const char *prompt)
+{ size_t len = strlen(OSC133_PROMPT)+strlen(prompt)+strlen(OSC133_INPUT);
+  char *marked = malloc(len+1);
+  char *delimited;
+
+  if ( !marked )
+    return NULL;
+
+  snprintf(marked, len+1, "%s%s%s", OSC133_PROMPT, prompt, OSC133_INPUT);
+  delimited = prompt_with_literals(marked);
+  free(marked);
+
+  return delimited;
+}
+
+
 static void
 update_prompt(el_context *ctx)
 { char *np = PL_prompt_string(ctx->istream);
@@ -394,7 +439,12 @@ update_prompt(el_context *ctx)
   free(ctx->prompt);
   free(ctx->prompt_raw);
   ctx->prompt = ctx->prompt_raw = NULL;
-  if ( np && (ctx->prompt=prompt_with_literals(np)) )
+  /* Prolog writes no prompt for a read that starts where the output
+     left the caret.  The input still starts there and is still edited,
+     so it is still marked.
+  */
+  ctx->prompt = marked_prompt(np ? np : "");
+  if ( np )
     ctx->prompt_raw = strdup(np);
 }
 
@@ -494,15 +544,14 @@ el_cursor_cp_delta(EditLine *el, int cp_delta)
 }
 
 
-/* el_bracketed_paste():
- *	Write the bracketed-paste enable (enable=1) or disable (enable=0)
- *	escape sequence to the terminal output.  On Windows the output handle
- *	is obtained via EL_GETHANDLE; on Unix via EL_GETFP.
+/* el_write_terminal():
+ *	Write a control sequence straight to the terminal, behind the
+ *	editor's display.  On Windows the output handle is obtained via
+ *	EL_GETHANDLE; on Unix via EL_GETFP.
  */
 static void
-el_bracketed_paste(EditLine *el, bool enable)
-{ const char *seq = enable ? "\033[?2004h" : "\033[?2004l";
-  size_t len = strlen(seq);
+el_write_terminal(EditLine *el, const char *seq)
+{ size_t len = strlen(seq);
 
 #ifdef __WINDOWS__
   { HANDLE hOut;
@@ -518,6 +567,15 @@ el_bracketed_paste(EditLine *el, bool enable)
     }
   }
 #endif
+}
+
+/* el_bracketed_paste():
+ *	Ask the terminal to bracket pasted text (enable=1) or to stop
+ *	doing so (enable=0).
+ */
+static void
+el_bracketed_paste(EditLine *el, bool enable)
+{ el_write_terminal(el, enable ? "\033[?2004h" : "\033[?2004l");
 }
 
 		 /*******************************
@@ -1747,7 +1805,11 @@ Sread_libedit(void *handle, char *buf, size_t size)
       if ( ctx->ostream )
 	Sflush(ctx->ostream);
       update_prompt(ctx);
-      if ( (line = el_siggets(ctx->el, &len)) && len > 0 )
+      line = el_siggets(ctx->el, &len);
+      el_write_terminal(ctx->el, OSC133_ENTERED); /* the line was entered:
+						     what follows is its
+						     output */
+      if ( line && len > 0 )
       { return send_one_buffer(ctx, line, buf, size);
       } else if ( len == 0 )
       { return 0;

@@ -94,7 +94,9 @@ apart, which is what lets it jump between prompts, act on the output of
 one command or, in Epilog, move the caret to a click in the line being
 edited.  A read that asks for a single character, as get_single_char/1
 and the debugger do, is not marked: there is no line being edited
-there.  A terminal that does not know the marks ignores them.
+there.  A terminal that does not know the marks ignores them; one that
+prints them instead can be spared them with el_set/2 using
+`prompt_marks(false)`.
 */
 
 el_wrap_if_ok :-
@@ -335,6 +337,14 @@ el_wrap(ProgName, In, Out, Error) :-
 %       ``ESC[?2004l`` sequence immediately.  enable_bracketed_paste/1
 %       manages this based on the current editor; you normally do not
 %       need to set it directly.
+%     - prompt_marks(+Boolean)
+%       Enable or disable the OSC 133 prompt marks described with this
+%       module.  They are enabled by default and are ignored by a
+%       terminal that does not know them; disable them for a terminal
+%       that prints them instead.  Note that Epilog then has neither
+%       mark nor bracketed paste to tell it that a line is being
+%       edited if bracketed paste is disabled as well, and a click no
+%       longer moves the caret.
 %
 %   This predicate fails silently of Action  is not implemented. Illegal
 %   input raises in an exception.
@@ -348,6 +358,9 @@ el_wrap(ProgName, In, Out, Error) :-
 %       keymap selected via el_bind/2 with `-e` / `-v`.
 %     - bracketed_paste(-Boolean)
 %       Whether bracketed paste mode is currently enabled; see
+%       el_set/2.
+%     - prompt_marks(-Boolean)
+%       Whether the prompt and the input are marked with OSC 133; see
 %       el_set/2.
 %
 %   Any other Property raises a `domain_error(editline_property, _)`.

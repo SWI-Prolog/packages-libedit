@@ -110,6 +110,7 @@ static atom_t ATOM_event;
 static atom_t ATOM_wordchars;
 static atom_t ATOM_editor;
 static atom_t ATOM_bracketed_paste;
+static atom_t ATOM_prompt_marks;
 static atom_t ATOM_attrs;
 
 static functor_t FUNCTOR_error2;
@@ -202,6 +203,7 @@ typedef struct el_context
   int			reader;		/* Current reader thread */
   bool			is_stdin;	/* Reading from file 0 */
   bool			bracketed_paste;/* Keep bracketed paste mode enabled */
+  bool			prompt_marks;	/* Mark prompt and input (OSC 133) */
   short			dispatching;	/* We are dispatching an event */
   short			cols;		/* Terminal size we told libedit */
   short			rows;		/* about.  See check_terminal_size() */
@@ -439,11 +441,15 @@ update_prompt(el_context *ctx)
   free(ctx->prompt);
   free(ctx->prompt_raw);
   ctx->prompt = ctx->prompt_raw = NULL;
-  /* Prolog writes no prompt for a read that starts where the output
-     left the caret.  The input still starts there and is still edited,
-     so it is still marked.
-  */
-  ctx->prompt = marked_prompt(np ? np : "");
+  if ( ctx->prompt_marks )
+  { /* Prolog writes no prompt for a read that starts where the output
+       left the caret.  The input still starts there and is still
+       edited, so it is still marked.
+    */
+    ctx->prompt = marked_prompt(np ? np : "");
+  } else if ( np )
+  { ctx->prompt = prompt_with_literals(np);
+  }
   if ( np )
     ctx->prompt_raw = strdup(np);
 }
@@ -1806,9 +1812,9 @@ Sread_libedit(void *handle, char *buf, size_t size)
 	Sflush(ctx->ostream);
       update_prompt(ctx);
       line = el_siggets(ctx->el, &len);
-      el_write_terminal(ctx->el, OSC133_ENTERED); /* the line was entered:
-						     what follows is its
-						     output */
+      if ( ctx->prompt_marks )			/* the line was entered: */
+	el_write_terminal(ctx->el, OSC133_ENTERED); /* what follows is its
+						       output */
       if ( line && len > 0 )
       { return send_one_buffer(ctx, line, buf, size);
       } else if ( len == 0 )
@@ -2114,6 +2120,7 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr, term_t options)
 #endif
 	ctx->flags   = el_flags;
 	ctx->bracketed_paste = false;
+	ctx->prompt_marks    = true;
 	ctx->istream = in;
 	ctx->ostream = out;
 	ctx->estream = err;
@@ -2666,6 +2673,21 @@ pl_set(term_t tin, term_t option)
 	}
 	return false;
       } else
+      if ( arity == 1 && name == ATOM_prompt_marks )
+      { int v;
+
+	if ( PL_get_arg(1, option, a) &&
+	     PL_get_bool_ex(a, &v) )
+	{ if ( ctx->prompt_marks != v )
+	  { ctx->prompt_marks = v;
+	    free(ctx->prompt);		/* the marks live in the prompt, */
+	    free(ctx->prompt_raw);	/* so build it again */
+	    ctx->prompt = ctx->prompt_raw = NULL;
+	  }
+	  return true;
+	}
+	return false;
+      } else
 #ifdef EL_ATTRS
       if ( arity == 2 && name == ATOM_attrs )
       { char *off, *on;
@@ -2722,6 +2744,13 @@ pl_get(term_t tin, term_t option)
 
     return PL_get_arg(1, option, a) &&
            PL_unify_bool(a, ctx->bracketed_paste);
+  }
+
+  if ( arity == 1 && name == ATOM_prompt_marks )
+  { term_t a = PL_new_term_ref();
+
+    return PL_get_arg(1, option, a) &&
+           PL_unify_bool(a, ctx->prompt_marks);
   }
 
   return PL_domain_error("editline_property", option);
@@ -3299,6 +3328,7 @@ install_libedit4pl(void)
   MKATOM(wordchars);
   MKATOM(editor);
   MKATOM(bracketed_paste);
+  MKATOM(prompt_marks);
   MKATOM(attrs);
 
   MKFUNCTOR(error, 2);

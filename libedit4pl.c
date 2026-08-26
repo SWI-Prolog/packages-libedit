@@ -129,6 +129,9 @@ static functor_t FUNCTOR_pair2;
 #define strdup(s) _strdup(s)
 #endif
 
+#define MAX_LINE_TAIL 512		/* Longer than a prompt ever is.  See
+					   THE UNFINISHED LINE below. */
+
 #define STR_OPTIONS (CVT_ATOM|CVT_STRING|CVT_LIST|REP_EL|CVT_EXCEPTION)
 
 		 /*******************************
@@ -212,6 +215,13 @@ typedef struct el_context
   pthread_mutex_t	paint_lock;	/* Serialise painting the input line */
   bool			line_hidden;	/* Input line is off the screen */
   bool			at_bol;		/* Foreign output ended a line */
+  char		       *line_tail;	/* Output on the line it did not end */
+  size_t		line_tail_len;	/* Bytes of it we hold */
+  size_t		line_tail_cols;	/* Roughly what it paints; only
+					   used to refuse a long one */
+  bool			line_tail_ok;	/* ... and we can hand it to libedit */
+  bool			prompt_from_bol;/* The prompt holds it, so paint from
+					   column 0 */
   unsigned int		flags;		/* Misc flags */
   int			histsize;	/* History size */
   struct
@@ -299,11 +309,137 @@ alloc_context(os_handle fd)
   c->fd    = fd;
   c->magic = EL_CTX_MAGIC;
   c->at_bol = true;
+  c->line_tail = malloc(MAX_LINE_TAIL+1);
+  c->line_tail_ok = (c->line_tail != NULL);
   pthread_mutex_init(&c->paint_lock, NULL);
   c->next  = el_clist;
   el_clist = c;
 
   return c;
+}
+
+
+		 /*******************************
+		 *	THE UNFINISHED LINE	*
+		 *******************************/
+
+/* The text on the output line the client has not ended.
+ *
+ * A read that starts where the output left the caret has no prompt of
+ * its own.  `format("name: "), read_line_to_string(user_input, S)' puts
+ * `name: ' on the screen as ordinary output and then reads, so libedit
+ * is handed an empty prompt and takes the line to start in column 0 --
+ * six columns to the left of where it does.  While it moves the caret
+ * relatively that goes unseen, but a full refresh (a SIGWINCH, a resize
+ * it notices at a keypress, ^L) redraws the input over `name: ' and
+ * leaves the caret six columns out.
+ *
+ * The column alone would not mend it: libedit repaints the columns it
+ * counts, so it has to be given the text.  Remember what went on the
+ * line and hand it to libedit as the front of its prompt.  libedit then
+ * counts those columns, paints them itself, and puts them back whenever
+ * it redraws.  See update_prompt() and the `\r' before el_siggets().
+ *
+ * What arrives here is what a stream write handler is given: bytes in
+ * the stream's encoding, while a prompt is UTF-8 (PL_prompt_string()).
+ * Only the encodings that convert without a decoder are taken; the rest
+ * give up, and give up is also what a line too long to put back on one
+ * row does.  Either way the line stays as it is today.
+ */
+
+/* How the units of a write become the UTF-8 of a prompt. */
+
+typedef enum
+{ TAIL_UTF8,				/* already UTF-8; copy the bytes */
+  TAIL_CODE,				/* one code point per unit */
+  TAIL_ASCII				/* the same, if it stays ASCII */
+} tail_encoding;
+
+static tail_encoding
+tail_encoding_of(IOSTREAM *s)
+{ switch(s ? s->encoding : ENC_ANSI)
+  { case ENC_UTF8:
+      return TAIL_UTF8;
+    case ENC_ISO_LATIN_1:
+    case ENC_OCTET:
+    case ENC_WCHAR:
+      return TAIL_CODE;
+    default:				/* ENC_ANSI and friends: a decoder */
+      return TAIL_ASCII;		/* we do not have */
+  }
+}
+
+
+static void
+line_tail_clear(el_context *ctx)
+{ ctx->line_tail_len  = 0;
+  ctx->line_tail_cols = 0;
+  ctx->line_tail_ok   = true;
+}
+
+
+/* Append one unit, or give up on the line.  Giving up is sticky until
+ * the line ends: half a prompt is worse than none.
+ */
+
+static void
+line_tail_add(el_context *ctx, int c, tail_encoding enc, bool visible)
+{ char buf[6];
+  size_t len, at;
+
+  if ( !ctx->line_tail_ok )
+    return;
+
+  if ( enc == TAIL_UTF8 || (c >= 0 && c < 0x80) )
+  { buf[0] = (char)c;
+    len = 1;
+  } else if ( enc == TAIL_ASCII ||
+	      c < 0 || c > 0x10ffff ||	/* not a code point, or half of */
+	      (c >= 0xd800 && c <= 0xdfff) ) /* one: a UTF-16 surrogate */
+  { ctx->line_tail_ok = false;		/* we cannot name this character */
+    return;
+  } else				/* TAIL_CODE: encode as UTF-8 */
+  { len = 0;
+    if ( c < 0x800 )
+    { buf[len++] = (char)(0xc0|(c>>6));
+    } else if ( c < 0x10000 )
+    { buf[len++] = (char)(0xe0|(c>>12));
+      buf[len++] = (char)(0x80|((c>>6)&0x3f));
+    } else
+    { buf[len++] = (char)(0xf0|(c>>18));
+      buf[len++] = (char)(0x80|((c>>12)&0x3f));
+      buf[len++] = (char)(0x80|((c>>6)&0x3f));
+    }
+    buf[len++] = (char)(0x80|(c&0x3f));
+  }
+
+  at = ctx->line_tail_len;		/* read once: two threads may write */
+  if ( at+len > MAX_LINE_TAIL )		/* to the same line, and neither */
+  { ctx->line_tail_ok = false;		/* may run off the buffer */
+    return;
+  }
+  memcpy(ctx->line_tail+at, buf, len);
+  ctx->line_tail[at+len] = '\0';
+  ctx->line_tail_len = at+len;
+  if ( visible )
+    ctx->line_tail_cols++;
+}
+
+
+/* The text to put in front of the prompt, or NULL to leave the line as
+ * the client left it.  A tail that does not fit on a row is refused:
+ * the `\r' that puts libedit at the start of it would land on the wrong
+ * one.
+ */
+
+static const char *
+adopted_line_tail(el_context *ctx)
+{ if ( !ctx->line_tail_ok || ctx->line_tail_len == 0 )
+    return NULL;
+  if ( ctx->cols > 0 && ctx->line_tail_cols >= (size_t)ctx->cols )
+    return NULL;
+
+  return ctx->line_tail;
 }
 
 
@@ -444,19 +580,49 @@ marked_prompt(const char *prompt, bool continuation)
 }
 
 
+/* The prompt libedit is to draw, which is what Prolog asked for behind
+ * whatever the client already put on the line.  Both are prompt as far
+ * as the user is concerned, and taking them together is what puts
+ * libedit's columns where the screen's are; see MAX_LINE_TAIL.
+ */
+
+static char *
+raw_prompt(el_context *ctx)
+{ const char *pre = adopted_line_tail(ctx);
+  const char *np  = PL_prompt_string(ctx->istream);
+
+  ctx->prompt_from_bol = (pre != NULL);
+  if ( !pre )
+    return np ? strdup(np) : NULL;
+  if ( !np )
+    return strdup(pre);
+
+  { size_t len = strlen(pre)+strlen(np);
+    char *raw = malloc(len+1);
+
+    if ( raw )
+      snprintf(raw, len+1, "%s%s", pre, np);
+
+    return raw;
+  }
+}
+
+
 static void
 update_prompt(el_context *ctx)
 { bool cont = PL_prompt_is_continuation(ctx->istream);
   char *np;
 
-  /* Before PL_prompt_string(): asking for the prompt is what makes the
-     one of a first line used up, and after that every prompt is a
-     continuation. */
-  np = PL_prompt_string(ctx->istream);
+  /* Before raw_prompt(), which is what asks for the prompt: asking is
+     what makes the one of a first line used up, and after that every
+     prompt is a continuation. */
+  np = raw_prompt(ctx);
 
   if ( ctx->prompt_raw && np && strcmp(np, ctx->prompt_raw) == 0 &&
        ctx->prompt_cont == cont )
+  { free(np);
     return;
+  }
 
   free(ctx->prompt);
   free(ctx->prompt_raw);
@@ -471,8 +637,7 @@ update_prompt(el_context *ctx)
   } else if ( np )
   { ctx->prompt = prompt_with_literals(np);
   }
-  if ( np )
-    ctx->prompt_raw = strdup(np);
+  ctx->prompt_raw = np;
 }
 
 
@@ -1831,13 +1996,22 @@ Sread_libedit(void *handle, char *buf, size_t size)
 
       if ( ctx->ostream )
 	Sflush(ctx->ostream);
+      update_prompt(ctx);
+      if ( ctx->prompt_from_bol )
+	el_write_terminal(ctx->el, "\r");   /* the prompt holds what the
+						client put on the line;
+						libedit paints it over
+						itself */
       if ( ctx->prompt_marks && ctx->output_open )
       { el_write_terminal(ctx->el, OSC133_DONE); /* the output of the line
-						    before this one is over */
+						    before this one is over.
+						    After the `\r': what the
+						    prompt took over is no
+						    longer output */
 	ctx->output_open = false;
       }
-      update_prompt(ctx);
       line = el_siggets(ctx->el, &len);
+      line_tail_clear(ctx);		/* the line the user entered ended */
       if ( ctx->prompt_marks )			/* the line was entered: */
       { el_write_terminal(ctx->el, OSC133_ENTERED); /* what follows is its
 						       output */
@@ -1876,24 +2050,34 @@ enc_unit(const char *buf, size_t i, bool wide)
 }
 
 
-/* Did this write leave the caret at the start of a line?
+/* Note what this write did to the line it went on: keep the record of
+ * an unfinished line (see MAX_LINE_TAIL above) and answer whether the
+ * write left the caret at the start of a new one.
  *
- * Not a question the last byte can answer.  A write handler is handed
- * the *encoded* text, and the encoding of a Windows console stream is
- * wchar: writeln/1 arrives as "hello\r\n" in UTF-16, whose last byte is
- * the zero half of the newline.  Taking that for a line that had not
- * ended left the input line off the screen -- the output overwrote the
- * prompt and no new prompt appeared until a key was pressed.
+ * Whether it ended the line is not a question the last byte can answer.
+ * A write handler is handed the *encoded* text, and the encoding of a
+ * Windows console stream is wchar: writeln/1 arrives as "hello\r\n" in
+ * UTF-16, whose last byte is the zero half of the newline.  Taking that
+ * for a line that had not ended left the input line off the screen --
+ * the output overwrote the prompt and no new prompt appeared until a
+ * key was pressed.
  *
- * Walk the text a character at a time, skip the escape sequences, and
- * report on the last one that actually moves the caret.  A carriage
- * return puts the caret in column 0 but leaves the line's content, so
- * it does not count as having ended it.
+ * So walk the text a character at a time and report on the last one
+ * that actually moves the caret.  A carriage return puts the caret in
+ * column 0 but leaves the line's content, so it does not count as
+ * having ended it -- though it does mean the next character lands on
+ * top of the first, which is where the record of the line starts over.
+ *
+ * The escape sequences move no caret and paint no column, but they go
+ * into the record: a prompt written in colour is put back in colour.
+ * prompt_with_literals() delimits them so libedit emits them without
+ * counting them.
  */
 
 static bool
-ends_at_bol(el_context *ctx, const char *buf, size_t size)
+note_output(el_context *ctx, const char *buf, size_t size)
 { bool wide = ( ctx->ostream && ctx->ostream->encoding == ENC_WCHAR );
+  tail_encoding enc = tail_encoding_of(ctx->ostream);
   size_t step = wide ? sizeof(wchar_t) : 1;
   bool bol = false;
 
@@ -1901,21 +2085,30 @@ ends_at_bol(el_context *ctx, const char *buf, size_t size)
   { int c = enc_unit(buf, i, wide);
 
     if ( c == 27 )				/* ESC: skip the sequence */
-    { i += step;
+    { line_tail_add(ctx, c, enc, false);
+      i += step;
       if ( i+step <= size && enc_unit(buf, i, wide) == '[' )
-      { i += step;				/* CSI: parameters, then */
+      { line_tail_add(ctx, '[', enc, false);
+	i += step;				/* CSI: parameters, then */
 	while( i+step <= size )			/* one final byte */
 	{ int p = enc_unit(buf, i, wide);
 
 	  if ( p < 0x20 || p > 0x3F )
 	    break;
+	  line_tail_add(ctx, p, enc, false);
 	  i += step;
 	}
       }
+      if ( i+step <= size )
+	line_tail_add(ctx, enc_unit(buf, i, wide), enc, false);
     } else if ( c == '\n' )
     { bol = true;
-    } else if ( c != '\r' )
+      line_tail_clear(ctx);
+    } else if ( c == '\r' )
+    { line_tail_clear(ctx);
+    } else
     { bol = false;
+      line_tail_add(ctx, c, enc, true);
     }
   }
 
@@ -1985,7 +2178,7 @@ Swrite_libedit(void *handle, char *buf, size_t size)
 #endif
     rc = (*ctx->orig_functions->write)(handle, buf, size);
     if ( rc > 0 )
-      ctx->at_bol = ends_at_bol(ctx, buf, (size_t)rc);
+      ctx->at_bol = note_output(ctx, buf, (size_t)rc);
     { char tail[64];
       bool wide = ( ctx->ostream && ctx->ostream->encoding == ENC_WCHAR );
       size_t step = wide ? sizeof(wchar_t) : 1;
@@ -2022,7 +2215,13 @@ Swrite_libedit(void *handle, char *buf, size_t size)
     return rc;
   }
 
-  return (*ctx->orig_functions->write)(handle, buf, size);
+  { ssize_t rc = (*ctx->orig_functions->write)(handle, buf, size);
+
+    if ( rc > 0 )			/* remember an unfinished line, so */
+      note_output(ctx, buf, (size_t)rc);/* a read starting on it has a
+					   prompt.  See MAX_LINE_TAIL. */
+    return rc;
+  }
 }
 
 
@@ -2324,6 +2523,8 @@ pl_unwrap(term_t tin)
       free(ctx->prompt);
     if ( ctx->prompt_raw )
       free(ctx->prompt_raw);
+    if ( ctx->line_tail )
+      free(ctx->line_tail);
 
     ctx->istream->functions = ctx->orig_functions;
     ctx->ostream->functions = ctx->orig_functions;

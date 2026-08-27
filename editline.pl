@@ -87,16 +87,20 @@ streams and program the library.
 
 While reading a line, the binding surrounds the prompt and the input
 with the OSC 133 _semantic prompt_ marks of FinalTerm: ``ESC]133;A``
-before the prompt, ``ESC]133;B`` before the input and ``ESC]133;C``
-after the line was entered.  A terminal that understands them (Epilog,
-iTerm2, kitty, WezTerm, VS Code) can tell prompt, input and output
-apart, which is what lets it jump between prompts, act on the output of
-one command or, in Epilog, move the caret to a click in the line being
-edited.  A read that asks for a single character, as get_single_char/1
-and the debugger do, is not marked: there is no line being edited
-there.  A terminal that does not know the marks ignores them; one that
-prints them instead can be spared them with el_set/2 using
-`prompt_marks(false)`.
+before the prompt, ``ESC]133;B`` before the input, ``ESC]133;C`` after
+the line was entered and ``ESC]133;D`` where its output ends, which is
+just before the next line is asked for.  A term that takes more than one
+line is read a line at a time; the prompt of each line after the first
+is marked ``ESC]133;A;k=s``, which says it continues an input rather
+than starting one, so that a terminal can keep the whole term together.  A terminal that understands
+them (Epilog, iTerm2, kitty, WezTerm, VS Code) can tell prompt, input
+and output apart, which is what lets it jump between prompts, act on the
+output of one command or, in Epilog, move the caret to a click in the
+line being edited.  A read that asks for a single character, as
+get_single_char/1 and the debugger do, is not marked: there is no line
+being edited there.  A terminal that does not know the marks ignores
+them; one that prints them instead can be spared them with el_set/2
+using `prompt_marks(false)`.
 */
 
 el_wrap_if_ok :-

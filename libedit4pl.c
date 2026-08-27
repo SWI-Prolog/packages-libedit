@@ -204,6 +204,8 @@ typedef struct el_context
   bool			is_stdin;	/* Reading from file 0 */
   bool			bracketed_paste;/* Keep bracketed paste mode enabled */
   bool			prompt_marks;	/* Mark prompt and input (OSC 133) */
+  bool			output_open;	/* Wrote OSC 133 C, owe a D */
+  bool			prompt_cont;	/* ... and it continues an input */
   short			dispatching;	/* We are dispatching an event */
   short			cols;		/* Terminal size we told libedit */
   short			rows;		/* about.  See check_terminal_size() */
@@ -307,23 +309,33 @@ alloc_context(os_handle fd)
 
 /* The OSC 133 "semantic prompt" marks of FinalTerm, as spoken by
  * iTerm2, kitty, WezTerm, VS Code and the Epilog terminal: `A' starts a
- * prompt, `B' ends the prompt and starts the line the user edits, and
- * `C' ends that line and starts the output of what was entered.  A
- * terminal that reads them knows what is prompt, what the user typed
- * and what came out of it.  Epilog uses `B' and `C' to know that there
- * is a line being edited and where it starts, so that a click in it can
- * ask us to move the caret there.
+ * prompt, `B' ends the prompt and starts the line the user edits, `C'
+ * ends that line and starts the output of what was entered, and `D' ends
+ * that output.  A terminal that reads them knows what is prompt, what
+ * the user typed and what came out of it.  Epilog uses `B' and `C' to
+ * know that there is a line being edited and where it starts, so that a
+ * click in it can ask us to move the caret there, and the four together
+ * to hand the whole command over to <-blocks.
  *
  * `A' and `B' are part of the prompt rather than written from here, so
  * that libedit emits them from its display, at the place where the
  * prompt and the input really start.  See marked_prompt().  A read that
  * asks for a single character is not marked at all: there is no line
  * being edited there.
+ *
+ * `D' is written before the next prompt rather than when the output
+ * stops, because nothing tells us that it has: the caret sits where the
+ * output left it until something asks for another line.  ctx->output_open
+ * keeps each `C' to one `D', so a read from inside a read -- the
+ * debugger, a nested toplevel -- cannot close a command that is still
+ * running.
  */
 
 #define OSC133_PROMPT  "\033]133;A\033\\"
+#define OSC133_PROMPT2 "\033]133;A;k=s\033\\"
 #define OSC133_INPUT   "\033]133;B\033\\"
 #define OSC133_ENTERED "\033]133;C\033\\"
+#define OSC133_DONE    "\033]133;D\033\\"
 
 #define PROMPT_LITERAL '\001'		/* our EL_PROMPT_ESC delimiter */
 
@@ -415,15 +427,16 @@ prompt_with_literals(const char *in)
  */
 
 static char *
-marked_prompt(const char *prompt)
-{ size_t len = strlen(OSC133_PROMPT)+strlen(prompt)+strlen(OSC133_INPUT);
+marked_prompt(const char *prompt, bool continuation)
+{ const char *a = continuation ? OSC133_PROMPT2 : OSC133_PROMPT;
+  size_t len = strlen(a)+strlen(prompt)+strlen(OSC133_INPUT);
   char *marked = malloc(len+1);
   char *delimited;
 
   if ( !marked )
     return NULL;
 
-  snprintf(marked, len+1, "%s%s%s", OSC133_PROMPT, prompt, OSC133_INPUT);
+  snprintf(marked, len+1, "%s%s%s", a, prompt, OSC133_INPUT);
   delimited = prompt_with_literals(marked);
   free(marked);
 
@@ -433,20 +446,28 @@ marked_prompt(const char *prompt)
 
 static void
 update_prompt(el_context *ctx)
-{ char *np = PL_prompt_string(ctx->istream);
+{ bool cont = PL_prompt_is_continuation(ctx->istream);
+  char *np;
 
-  if ( ctx->prompt_raw && np && strcmp(np, ctx->prompt_raw) == 0 )
+  /* Before PL_prompt_string(): asking for the prompt is what makes the
+     one of a first line used up, and after that every prompt is a
+     continuation. */
+  np = PL_prompt_string(ctx->istream);
+
+  if ( ctx->prompt_raw && np && strcmp(np, ctx->prompt_raw) == 0 &&
+       ctx->prompt_cont == cont )
     return;
 
   free(ctx->prompt);
   free(ctx->prompt_raw);
   ctx->prompt = ctx->prompt_raw = NULL;
+  ctx->prompt_cont = cont;
   if ( ctx->prompt_marks )
   { /* Prolog writes no prompt for a read that starts where the output
        left the caret.  The input still starts there and is still
        edited, so it is still marked.
     */
-    ctx->prompt = marked_prompt(np ? np : "");
+    ctx->prompt = marked_prompt(np ? np : "", cont);
   } else if ( np )
   { ctx->prompt = prompt_with_literals(np);
   }
@@ -1810,11 +1831,18 @@ Sread_libedit(void *handle, char *buf, size_t size)
 
       if ( ctx->ostream )
 	Sflush(ctx->ostream);
+      if ( ctx->prompt_marks && ctx->output_open )
+      { el_write_terminal(ctx->el, OSC133_DONE); /* the output of the line
+						    before this one is over */
+	ctx->output_open = false;
+      }
       update_prompt(ctx);
       line = el_siggets(ctx->el, &len);
       if ( ctx->prompt_marks )			/* the line was entered: */
-	el_write_terminal(ctx->el, OSC133_ENTERED); /* what follows is its
+      { el_write_terminal(ctx->el, OSC133_ENTERED); /* what follows is its
 						       output */
+	ctx->output_open = true;
+      }
       if ( line && len > 0 )
       { return send_one_buffer(ctx, line, buf, size);
       } else if ( len == 0 )

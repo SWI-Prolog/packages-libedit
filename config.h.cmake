@@ -12,3 +12,4 @@
 #cmakedefine HAVE_WCSDUP @HAVE_WCSDUP@
 
 #cmakedefine O_SIGNALS @O_SIGNALS@
+#cmakedefine O_PLMT @O_PLMT@

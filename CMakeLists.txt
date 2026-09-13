@@ -55,6 +55,7 @@ swipl_plugin(
     libedit
     MODULE libedit4pl
     C_SOURCES libedit4pl.c
+    THREADED
     C_LIBS ${LIBEDIT_LIBRARIES}
     C_INCLUDE_DIR ${LIBEDIT_INCLUDE_DIR}
     PL_LIBS editline.pl)

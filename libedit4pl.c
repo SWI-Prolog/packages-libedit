@@ -47,7 +47,9 @@
 #include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
+#ifdef O_PLMT
 #include <pthread.h>
+#endif
 
 #if defined(HAVE_POLL_H) && defined(HAVE_POLL)
 #include <poll.h>
@@ -135,6 +137,30 @@ static functor_t FUNCTOR_pair2;
 #define STR_OPTIONS (CVT_ATOM|CVT_STRING|CVT_LIST|REP_EL|CVT_EXCEPTION)
 
 		 /*******************************
+		 *          PAINT LOCK          *
+		 *******************************/
+
+/* Serialise painting the input line between the thread that reads it
+ * and any thread that writes to the terminal.  A single threaded build
+ * has no second writer, so the lock compiles away and the binding does
+ * not need pthreads at all.  See Swrite_libedit().
+ */
+
+#ifdef O_PLMT
+typedef pthread_mutex_t paint_lock_t;
+#define paint_lock_init(l)	pthread_mutex_init(l, NULL)
+#define paint_lock_destroy(l)	pthread_mutex_destroy(l)
+#define paint_lock(l)		pthread_mutex_lock(l)
+#define paint_unlock(l)		pthread_mutex_unlock(l)
+#else
+typedef char paint_lock_t;
+#define paint_lock_init(l)	((void)0)
+#define paint_lock_destroy(l)	((void)0)
+#define paint_lock(l)		((void)0)
+#define paint_unlock(l)		((void)0)
+#endif
+
+		 /*******************************
 		 *           WIN/UNIX           *
 		 *******************************/
 
@@ -212,7 +238,7 @@ typedef struct el_context
   short			dispatching;	/* We are dispatching an event */
   short			cols;		/* Terminal size we told libedit */
   short			rows;		/* about.  See check_terminal_size() */
-  pthread_mutex_t	paint_lock;	/* Serialise painting the input line */
+  paint_lock_t		paint_lock;	/* Serialise painting the input line */
   bool			line_hidden;	/* Input line is off the screen */
   bool			at_bol;		/* Foreign output ended a line */
   char		       *line_tail;	/* Output on the line it did not end */
@@ -311,7 +337,7 @@ alloc_context(os_handle fd)
   c->at_bol = true;
   c->line_tail = malloc(MAX_LINE_TAIL+1);
   c->line_tail_ok = (c->line_tail != NULL);
-  pthread_mutex_init(&c->paint_lock, NULL);
+  paint_lock_init(&c->paint_lock);
   c->next  = el_clist;
   el_clist = c;
 
@@ -1211,7 +1237,7 @@ refresh(el_context *ctx)
    * the prompt over what was written. */
   const char *nl = ( ctx->line_hidden && !ctx->at_bol ) ? "\r\n" : "\r";
 
-  pthread_mutex_lock(&ctx->paint_lock);
+  paint_lock(&ctx->paint_lock);
 #if __WINDOWS__
   HANDLE hErr;
   el_get(ctx->el, EL_GETHANDLE, 2, &hErr);
@@ -1232,7 +1258,7 @@ refresh(el_context *ctx)
   el_set(ctx->el, EL_REFRESH);
   ctx->line_hidden = false;
   ctx->at_bol = true;
-  pthread_mutex_unlock(&ctx->paint_lock);
+  paint_unlock(&ctx->paint_lock);
 }
 
 
@@ -2168,7 +2194,7 @@ Swrite_libedit(void *handle, char *buf, size_t size)
      */
     ssize_t rc;
 
-    pthread_mutex_lock(&ctx->paint_lock);
+    paint_lock(&ctx->paint_lock);
 #ifdef EL_ERASELINE			/* our copy of libedit; see below */
     if ( !ctx->line_hidden )
     { el_set(ctx->el, EL_ERASELINE);
@@ -2210,7 +2236,7 @@ Swrite_libedit(void *handle, char *buf, size_t size)
     } else
     { ctx->sig_no = SIGWINCH;		/* restore the line on input */
     }
-    pthread_mutex_unlock(&ctx->paint_lock);
+    paint_unlock(&ctx->paint_lock);
 
     return rc;
   }
@@ -2541,7 +2567,7 @@ pl_unwrap(term_t tin)
 #endif
 
     el_end(ctx->el);
-    pthread_mutex_destroy(&ctx->paint_lock);
+    paint_lock_destroy(&ctx->paint_lock);
     PL_free(ctx);
     update_always_signals();
 

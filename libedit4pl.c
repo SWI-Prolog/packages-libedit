@@ -1077,6 +1077,33 @@ win_wait_for_key_down(HANDLE hIn, int timeout)
     return false;
   }
 }
+
+/* Input from a pipe, as Epilog (swipl-win) provides it, cannot be
+ * waited for: a pipe handle is not a waitable object.  So we poll for
+ * bytes in it.  read_char() reads the pipe a byte at a time, so text
+ * that is pasted is still in the pipe while we wait.  Without this, the
+ * electric caret waited its full time out for every closing bracket of
+ * a paste.
+ */
+
+static bool
+win_wait_for_pipe_input(HANDLE hIn, int timeout)
+{ ULONGLONG start = GetTickCount64();
+
+  for(;;)
+  { DWORD avail = 0;
+    int wait;
+
+    if ( !PeekNamedPipe(hIn, NULL, 0, NULL, &avail, NULL) )
+      return true;			/* error or end of file: wake up */
+    if ( avail > 0 )
+      return true;
+    wait = timeout - (int)(GetTickCount64()-start);
+    if ( wait <= 0 )
+      return false;
+    Sleep(wait < 10 ? wait : 10);
+  }
+}
 #endif/*__WINDOWS__*/
 
 
@@ -1086,6 +1113,8 @@ wait_for_input(EditLine *el, int timeout) /* milliseconds */
 #ifdef __WINDOWS__
   HANDLE hIn;
   el_get(el, EL_GETHANDLE, 0, &hIn);
+  if ( GetFileType(hIn) == FILE_TYPE_PIPE )
+    return win_wait_for_pipe_input(hIn, timeout);
   return win_wait_for_key_down(hIn, timeout);
 #else/*__WINDOWS__*/
   FILE *in;

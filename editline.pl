@@ -105,9 +105,20 @@ them with el_set/2 using `prompt_marks(false)`.
 
 el_wrap_if_ok :-
     stream_property(user_input, tty(true)),
+    os_stream(user_output),
+    os_stream(user_error),
     !,
     el_wrap.
 el_wrap_if_ok.
+
+%   The output streams must be OS files for el_wrap/5.  They are not
+%   if the library is loaded by a thread that was created while the
+%   output was captured, e.g., by with_output_to/3 or a unit test: the
+%   thread inherits the memory streams, while user_input is still the
+%   terminal.
+
+os_stream(Stream) :-
+    stream_property(Stream, file_no(_)).
 
 %!  el_wrap is det.
 %!  el_wrap(+Options) is det.

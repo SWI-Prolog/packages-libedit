@@ -1408,15 +1408,17 @@ electric_cursor_read_char(el_context *ctx, el_char_t *cp)
 #define ISUTF8_FB2(c) (((c)&0xe0) == 0xc0)
 #define ISUTF8_FB3(c) (((c)&0xf0) == 0xe0)
 #define ISUTF8_FB4(c) (((c)&0xf8) == 0xf0)
-#define ISUTF8_FB5(c) (((c)&0xfc) == 0xf8)
-#define ISUTF8_FB6(c) (((c)&0xfe) == 0xfc)
 
 #define UTF8_FBN(c) (!(c&0x80)     ? 0 : \
 		     ISUTF8_FB2(c) ? 1 : \
 		     ISUTF8_FB3(c) ? 2 : \
-		     ISUTF8_FB4(c) ? 3 : \
-		     ISUTF8_FB5(c) ? 4 : \
-		     ISUTF8_FB6(c) ? 5 : -1)
+		     ISUTF8_FB4(c) ? 3 : -1)
+
+/* As _PL__utf8_code_point(): only the shortest encoding of a code point
+   up to U+10FFFF is valid.
+*/
+
+static const int utf8_min_code[4] = { 0, 0x80, 0x800, 0x10000 };
 
 static int
 utf8_code_point(const char **i, const char *e, int *cp)
@@ -1440,12 +1442,6 @@ utf8_code_point(const char **i, const char *e, int *cp)
   } else if ( c < 0xf8 )
   { code = c & 0x07;
     n = 3;
-  } else if ( c < 0xfc )
-  { code = c & 0x03;
-    n = 4;
-  } else if (c < 0xfe)
-  { code = c & 0x01;
-    n = 5;
   } else
   { return -1;
   }
@@ -1461,8 +1457,16 @@ utf8_code_point(const char **i, const char *e, int *cp)
     code = (code << 6) | (c & 0x3f);
   }
 
+  if ( code < utf8_min_code[n] || code > 0x10FFFF )
+    return -1;				/* overlong or too large */
+
   *i += n;
   *cp = code;
+
+  if ( code >= 0xD800 && code <= 0xDFFF )
+  { *cp = 0xFFFD;			/* surrogate */
+    return -1;
+  }
 
   return n + 1;
 }

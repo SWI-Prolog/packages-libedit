@@ -1435,13 +1435,13 @@ cancel_pending_read(HANDLE hPipe, OVERLAPPED *ov)
 { DWORD bytes;
 
   CancelIoEx(hPipe, ov);
-  GetOverlappedResult(hPipe, ov, &bytes, TRUE); /* ERROR_OPERATION_ABORTED */
+  GetOverlappedResult(hPipe, ov, &bytes, true); /* ERROR_OPERATION_ABORTED */
 }
 
 static ssize_t
 pipe_read_or_msg(HANDLE hPipe, void *buf, size_t len)
 { OVERLAPPED ov = {0};
-  ov.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+  ov.hEvent = CreateEvent(NULL, true, false, NULL);
   if (!ov.hEvent)
     return PIPE_READ_ERROR;
 
@@ -1459,7 +1459,7 @@ pipe_read_or_msg(HANDLE hPipe, void *buf, size_t len)
 
 	if ( res == WAIT_OBJECT_0 )
 	{ // Read completed
-	  if ( GetOverlappedResult(hPipe, &ov, &bytesRead, FALSE) )
+	  if ( GetOverlappedResult(hPipe, &ov, &bytesRead, false) )
 	  { CloseHandle(ov.hEvent);
 	    return (ssize_t)bytesRead;
 	  } else
@@ -2292,10 +2292,10 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr, term_t options)
   int alert = 0;
 
   if ( !PL_get_chars(progid, &prog, STR_OPTIONS) )
-    return FALSE;
+    return false;
   if ( !PL_scan_options(options, 0, "el_wrap_options",
 			el_wrap_options, &pipes, &histsize, &alert) )
-    return FALSE;
+    return false;
   if ( pipes )
     el_flags |= EPILOG;
 #ifdef O_SIGNALS
@@ -2342,7 +2342,7 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr, term_t options)
 	ctx->history = history_init();
 	ctx->histsize = histsize;
 	history(ctx->history, &ctx->ev, H_SETSIZE,   histsize);
-	history(ctx->history, &ctx->ev, H_SETUNIQUE, TRUE);
+	history(ctx->history, &ctx->ev, H_SETUNIQUE, true);
 
 #ifdef __WINDOWS__
 	ctx->el = el_init_handles(prog, fd_in, fd_out, fd_err, el_flags);
@@ -2550,13 +2550,13 @@ pl_source(term_t tin, term_t file)
       fname = NULL;
     else if ( !PL_get_file_name(file, &fname,
 				PL_FILE_OSPATH|PL_FILE_SEARCH|PL_FILE_READ) )
-      return FALSE;
+      return false;
 
     el_source(ctx->el, fname);
-    return TRUE;
+    return true;
   }
 
-  return FALSE;
+  return false;
 }
 
 
@@ -2586,7 +2586,7 @@ get_key(const char *s, int *k)
 	  { *k = (octval(s[1]) << 6) + (octval(s[2]) << 3) + octval(s[3]);
 	    break;
 	  }
-	  return FALSE;
+	  return false;
       }
       break;
     case '^':
@@ -2594,14 +2594,14 @@ get_key(const char *s, int *k)
       { *k = s[1] - '@';
 	break;
       }
-      return FALSE;
+      return false;
     case 0:
-      return FALSE;
+      return false;
     default:
       *k = s[0]&0xff;
   }
 
-  return TRUE;
+  return true;
 }
 
 
@@ -2691,7 +2691,7 @@ pl_addfn(term_t tin, term_t tname, term_t thelp, term_t goal)
     module_t m = NULL;
 
     if ( !PL_strip_module(goal, &m, goal) )
-      return FALSE;
+      return false;
     if ( !PL_is_callable(goal) )
       return PL_type_error("callable", goal);
     if ( !(c=malloc(sizeof(*c))) )
@@ -2705,10 +2705,10 @@ pl_addfn(term_t tin, term_t tname, term_t thelp, term_t goal)
 
     el_set(ctx->el, EL_ADDFN, name, help, prolog_function);
 
-    return TRUE;
+    return true;
   }
 
-  return FALSE;
+  return false;
 }
 
 
@@ -2740,7 +2740,7 @@ bind_command(el_context *ctx, const char *key, const char *cmd)
   if ( len == 0 ||
        (len <= 2 && (len < 2 || p[0] == '^')) )
   { if ( !get_key(p, &k) )
-      return TRUE;
+      return true;
   } else
   { k = (unsigned char)p[len-1];
   }
@@ -2759,7 +2759,7 @@ bind_command(el_context *ctx, const char *key, const char *cmd)
 	{ if ( b->ch == k )
 	  { b->command = c;
 	    PL_unregister_atom(cname);
-	    return TRUE;
+	    return true;
 	  }
 	}
 
@@ -2777,7 +2777,7 @@ bind_command(el_context *ctx, const char *key, const char *cmd)
     PL_unregister_atom(cname);
   }
 
-  return TRUE;
+  return true;
 }
 
 
@@ -2797,12 +2797,12 @@ pl_bind(term_t tin, term_t options)
 
     while(PL_get_list_ex(tail, head, tail))
     { if ( !PL_get_chars(head, &av[ac++], STR_OPTIONS) )
-	return FALSE;
+	return false;
       if ( ac >= EL_BIND_MAX_ARGS )
 	return PL_representation_error("el_bind_arguments");
     }
     if ( !PL_get_nil_ex(tail) )
-      return FALSE;
+      return false;
 
     switch(ac)
     { case 0:
@@ -2813,7 +2813,7 @@ pl_bind(term_t tin, term_t options)
 	break;
       case 2:
 	if ( !bind_command(ctx, av[0], av[1]) )
-	  return FALSE;
+	  return false;
 	rc = el_set(ctx->el, EL_BIND, av[0], av[1], NULL);
 	break;
       case 3:
@@ -2846,10 +2846,10 @@ pl_bind(term_t tin, term_t options)
     }
 
     (void)rc;					/* TBD: check? */
-    return TRUE;
+    return true;
   }
 
-  return FALSE;
+  return false;
 }
 
 
@@ -2981,10 +2981,10 @@ pl_cursor(term_t tin, term_t move)
   if ( PL_get_integer_ex(move, &amount) &&
        get_el_context(tin, &ctx) )
   { el_cursor(ctx->el, el_cursor_cp_delta(ctx->el, amount));
-    return TRUE;
+    return true;
   }
 
-  return FALSE;
+  return false;
 }
 
 static foreign_t
@@ -3012,7 +3012,7 @@ pl_line(term_t tin, term_t line)
 	   );
   }
 
-  return FALSE;
+  return false;
 }
 
 static foreign_t
@@ -3024,10 +3024,10 @@ pl_insertstr(term_t tin, term_t insert)
        get_el_context(tin, &ctx) )
   { el_insertstr(ctx->el, s);
 
-    return TRUE;
+    return true;
   }
 
-  return FALSE;
+  return false;
 }
 
 static foreign_t
@@ -3039,10 +3039,10 @@ pl_deletestr(term_t tin, term_t count)
        get_el_context(tin, &ctx) )
   { el_deletestr(ctx->el, amount);
 
-    return TRUE;
+    return true;
   }
 
-  return FALSE;
+  return false;
 }
 
 static foreign_t
@@ -3083,7 +3083,7 @@ pl_getc(term_t tin, term_t c)
     }
   }
 
-  return FALSE;
+  return false;
 }
 
 static foreign_t
@@ -3091,17 +3091,17 @@ pl_push(term_t tin, term_t c)
 { el_context *ctx;
   int ic;
 
-  if ( PL_get_char_ex(c, &ic, FALSE) &&
+  if ( PL_get_char_ex(c, &ic, false) &&
        get_el_context(tin, &ctx) )
   { wchar_t wc[2];
     wc[0] = ic;
     wc[1] = 0;
     el_wpush(ctx->el, wc);
 
-    return TRUE;
+    return true;
   }
 
-  return FALSE;
+  return false;
 }
 
 static foreign_t
@@ -3113,10 +3113,10 @@ pl_editmode(term_t tin, term_t on)
        get_el_context(tin, &ctx) )
   { el_set(ctx->el, EL_EDITMODE, m);
 
-    return TRUE;
+    return true;
   }
 
-  return FALSE;
+  return false;
 }
 
 
@@ -3132,11 +3132,11 @@ pl_add_history(term_t tin, term_t text)
 
   if ( !PL_get_chars(text, &line, STR_OPTIONS) ||
        !get_el_context(tin, &ctx) )
-    return FALSE;
+    return false;
 
   history(ctx->history, &ctx->ev, H_ENTER, line);
 
-  return TRUE;
+  return true;
 }
 
 
@@ -3149,10 +3149,10 @@ pl_write_history(term_t tin, term_t file_name)
        PL_get_file_name(file_name, &fname,
 			PL_FILE_OSPATH|PL_FILE_SEARCH|PL_FILE_WRITE) )
   { history(ctx->history, &ctx->ev, H_SAVE, fname);
-    return TRUE;
+    return true;
   }
 
-  return FALSE;
+  return false;
 }
 
 
@@ -3190,7 +3190,7 @@ pl_history_events(term_t tin, term_t events)
   if ( get_el_context(tin, &ctx) )
   { HistEvent ev;
     int curr = 0;
-    int rc = FALSE;
+    int rc = false;
     term_t tail = PL_copy_term_ref(events);
     term_t head = PL_new_term_ref();
 
@@ -3213,7 +3213,7 @@ pl_history_events(term_t tin, term_t events)
     return rc;
   }
 
-  return FALSE;
+  return false;
 }
 
 
@@ -3308,7 +3308,7 @@ pl_history(term_t tin, term_t option)
       if ( name == ATOM_setsize )
       { int s;
 	if ( arity != 1 ) goto err_domain;
-	if ( !get_int_arg(1, option, &s) ) return FALSE;
+	if ( !get_int_arg(1, option, &s) ) return false;
 	rc = history(ctx->history, &ev, H_SETSIZE, s);
 	if ( rc == 0 )
 	  ctx->histsize = s;
@@ -3359,7 +3359,7 @@ pl_history(term_t tin, term_t option)
       } else if ( name == ATOM_setunique )
       { int u;
 	if ( arity != 1 ) goto err_domain;
-	if ( !get_bool_arg(1, option, &u) ) return FALSE;
+	if ( !get_bool_arg(1, option, &u) ) return false;
 	rc = history(ctx->history, &ev, H_SETUNIQUE, u);
       } else
       { err_domain:
@@ -3367,15 +3367,15 @@ pl_history(term_t tin, term_t option)
       }
 
       if ( rc == 0 )
-	return TRUE;
+	return true;
 
-      return FALSE;				/* What exception? */
+      return false;				/* What exception? */
     }
 
     return PL_type_error("callable", option);
   }
 
-  return FALSE;
+  return false;
 }
 
 #ifndef HAVE_OPEN_MEMSTREAM

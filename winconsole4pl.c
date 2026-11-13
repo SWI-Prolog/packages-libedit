@@ -197,7 +197,7 @@ set_console_size(HANDLE hOut, int cols, int rows, const char *pred)
   COORD size;
   SMALL_RECT rect;
 
-  if ( !SetConsoleWindowInfo(hOut, TRUE, &minimal) )
+  if ( !SetConsoleWindowInfo(hOut, true, &minimal) )
     return win_error(pred);
 
   size.X = (SHORT)cols;
@@ -209,7 +209,7 @@ set_console_size(HANDLE hOut, int cols, int rows, const char *pred)
   rect.Top    = 0;
   rect.Right  = (SHORT)(cols-1);
   rect.Bottom = (SHORT)(rows-1);
-  if ( !SetConsoleWindowInfo(hOut, TRUE, &rect) )
+  if ( !SetConsoleWindowInfo(hOut, true, &rect) )
     return win_error(pred);
 
   return true;
@@ -224,7 +224,7 @@ static foreign_t
 win_console_open(term_t A1, term_t A2)
 { int cols, rows;
   wincon *c = &console;
-  SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
+  SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, true };
   DWORD mode, err;
 
   if ( !PL_get_integer_ex(A1, &cols) ||
@@ -336,7 +336,7 @@ win_console_spawn(term_t A1)
 
   /* No CREATE_NEW_CONSOLE: the child is to use ours, which is what
      makes its output land in the buffer we read back. */
-  if ( !CreateProcessW(NULL, cmdbuf, NULL, NULL, TRUE,
+  if ( !CreateProcessW(NULL, cmdbuf, NULL, NULL, true,
 		       0, NULL, NULL, &si, &pi) )
   { free(cmdbuf);
     return win_error("win_console_spawn/1");

@@ -1404,7 +1404,6 @@ electric_cursor_read_char(el_context *ctx, el_char_t *cp)
 }
 
 /* from SWI-Prolog src/os/pl-utf8.h */
-#define ISUTF8_CB(c)  (((c)&0xc0) == 0x80) /* Is continuation byte */
 #define ISUTF8_FB2(c) (((c)&0xe0) == 0xc0)
 #define ISUTF8_FB3(c) (((c)&0xf0) == 0xe0)
 #define ISUTF8_FB4(c) (((c)&0xf8) == 0xf0)
@@ -1413,78 +1412,6 @@ electric_cursor_read_char(el_context *ctx, el_char_t *cp)
 		     ISUTF8_FB2(c) ? 1 : \
 		     ISUTF8_FB3(c) ? 2 : \
 		     ISUTF8_FB4(c) ? 3 : -1)
-
-/* As _PL__utf8_code_point(): only the shortest encoding of a code point
-   up to U+10FFFF is valid.
-*/
-
-static const int utf8_min_code[4] = { 0, 0x80, 0x800, 0x10000 };
-
-static int
-utf8_code_point(const char **i, const char *e, int *cp)
-{ unsigned char c = (unsigned char)**i;
-  int code;
-  int n;
-
-  ++(*i);
-  *cp = c;
-  if ( c < 0x80 )
-    return 1;
-  if ( c < 0xc0 )
-    return -1;
-
-  if ( c < 0xe0)
-  { code = c & 0x1f;
-    n = 1;
-  } else if ( c < 0xf0 )
-  { code = c & 0x0f;
-    n = 2;
-  } else if ( c < 0xf8 )
-  { code = c & 0x07;
-    n = 3;
-  } else
-  { return -1;
-  }
-
-  for (int k = 0; k < n; ++k)
-  { if ( *i + k == e )
-      return -1;
-
-    c = (*i)[k];
-    if ( c < 0x80 || c >= 0xc0 )
-      return -1;
-
-    code = (code << 6) | (c & 0x3f);
-  }
-
-  if ( code < utf8_min_code[n] || code > 0x10FFFF )
-    return -1;				/* overlong or too large */
-
-  *i += n;
-  *cp = code;
-
-  if ( code >= 0xD800 && code <= 0xDFFF )
-  { *cp = 0xFFFD;			/* surrogate */
-    return -1;
-  }
-
-  return n + 1;
-}
-
-
-/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-Deprecated old API for decoding UTF-8 strings.
-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
-
-char *
-utf8_get_char(const char *in, int *chr)
-{ const char *i = in;
-
-  utf8_code_point(&i, NULL, chr);
-
-  return (char*)i;
-}
-
 
 #ifdef __WINDOWS__
 #define PIPE_READ_EOF               0   // End of file
@@ -1754,7 +1681,8 @@ read_char(EditLine *el, el_char_t *cp)
 	  }
 	}
 	int chr;
-	utf8_get_char(buffer, &chr);
+	const char *in = buffer;
+	PL_utf8_code_point(&in, &buffer[start], &chr);
 #if SIZEOF_WCHAR_T == 2
 	/* On Windows wchar_t is a 16-bit UTF-16 code unit, so a
 	 * supplementary code point (U+10000 and above — emoji, CJK

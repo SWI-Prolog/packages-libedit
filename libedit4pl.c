@@ -2568,7 +2568,7 @@ pl_source(term_t tin, term_t file)
 #define isoctal(c) ((c) >= '0' && (c) <= '7')
 #define octval(c)  ((c) - '0')
 
-static int
+static bool
 get_key(const char *s, int *k)
 { switch(s[0])
   { case '\\':
@@ -2719,7 +2719,7 @@ cannot bind e.g., both "^[?" and "?".  I see no way out using the public
 interface of libedit.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-static int
+static bool
 bind_command(el_context *ctx, const char *key, const char *cmd)
 { int k;
   const char *p = key;
@@ -3174,7 +3174,7 @@ pl_read_history(term_t tin, term_t file_name)
 }
 
 
-static int
+static bool
 append_ev(term_t tail, term_t head, const HistEvent *ev)
 { return ( PL_unify_list(tail, head, tail) &&
 	   PL_unify_term(head, PL_FUNCTOR, FUNCTOR_pair2,
